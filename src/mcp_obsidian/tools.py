@@ -294,18 +294,18 @@ class PutContentToolHandler(ToolHandler):
    def get_tool_description(self):
        return Tool(
            name=self.name,
-           description="Update content of a new or existing file in the vault.",
+           description="Create a new file in your vault or update the content of an existing one in your vault.",
            inputSchema={
                "type": "object",
                "properties": {
                    "filepath": {
                        "type": "string",
-                       "description": "Path to the file (relative to vault root)",
+                       "description": "Path to the relevant file (relative to your vault root)",
                        "format": "path"
                    },
                    "content": {
                        "type": "string",
-                       "description": "Content of the file you would like to update"
+                       "description": "Content of the file you would like to upload"
                    }
                },
                "required": ["filepath", "content"]
@@ -322,7 +322,7 @@ class PutContentToolHandler(ToolHandler):
        return [
            TextContent(
                type="text",
-               text=f"Successfully updated content in {args['filepath']}"
+               text=f"Successfully uploaded content to {args['filepath']}"
            )
        ]
    
