@@ -172,11 +172,14 @@ class Obsidian():
 
         return self._safe_call(call_fn)
     
-    def get_periodic_note(self, period: str) -> Any:
+    def get_periodic_note(self, period: str, type: str = "content") -> Any:
         """Get current periodic note for the specified period.
         
         Args:
             period: The period type (daily, weekly, monthly, quarterly, yearly)
+            type: Type of the data to get ('content' or 'metadata'). 
+                'content' returns just the content in Markdown format. 
+                'metadata' includes note metadata (including paths, tags, etc.) and the content.. 
             
         Returns:
             Content of the periodic note
@@ -184,7 +187,10 @@ class Obsidian():
         url = f"{self.get_base_url()}/periodic/{period}/"
         
         def call_fn():
-            response = requests.get(url, headers=self._get_headers(), verify=self.verify_ssl, timeout=self.timeout)
+            headers = self._get_headers()
+            if type == "metadata":
+                headers['Accept'] = 'application/vnd.olrapi.note+json'
+            response = requests.get(url, headers=headers, verify=self.verify_ssl, timeout=self.timeout)
             response.raise_for_status()
             
             return response.text
