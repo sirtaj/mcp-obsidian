@@ -1,5 +1,6 @@
 import requests
 import urllib.parse
+import os
 from typing import Any
 
 class Obsidian():
@@ -8,7 +9,7 @@ class Obsidian():
             api_key: str,
             protocol: str = 'https',
             host: str = "127.0.0.1",
-            port: int = 27124,
+            port: int = int(os.getenv('OBSIDIAN_PORT', '27124')),
             verify_ssl: bool = False,
         ):
         self.api_key = api_key
