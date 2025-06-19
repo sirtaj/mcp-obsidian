@@ -422,6 +422,12 @@ class PeriodicNotesToolHandler(ToolHandler):
                         "type": "string",
                         "description": "The period type (daily, weekly, monthly, quarterly, yearly)",
                         "enum": ["daily", "weekly", "monthly", "quarterly", "yearly"]
+                    },
+                    "type": {
+                        "type": "string",
+                        "description": "The type of data to get ('content' or 'metadata'). 'content' returns just the content in Markdown format. 'metadata' includes note metadata (including paths, tags, etc.) and the content.",
+                        "default": "content",
+                        "enum": ["content", "metadata"]
                     }
                 },
                 "required": ["period"]
@@ -436,9 +442,14 @@ class PeriodicNotesToolHandler(ToolHandler):
         valid_periods = ["daily", "weekly", "monthly", "quarterly", "yearly"]
         if period not in valid_periods:
             raise RuntimeError(f"Invalid period: {period}. Must be one of: {', '.join(valid_periods)}")
+        
+        type = args["type"] if "type" in args else "content"
+        valid_types = ["content", "metadata"]
+        if type not in valid_types:
+            raise RuntimeError(f"Invalid type: {type}. Must be one of: {', '.join(valid_types)}")
 
         api = obsidian.Obsidian(api_key=api_key, host=obsidian_host)
-        content = api.get_periodic_note(period)
+        content = api.get_periodic_note(period,type)
 
         return [
             TextContent(
