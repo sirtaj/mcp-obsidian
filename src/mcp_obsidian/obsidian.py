@@ -7,13 +7,18 @@ class Obsidian():
     def __init__(
             self, 
             api_key: str,
-            protocol: str = 'https',
-            host: str = "127.0.0.1",
+            protocol: str = os.getenv('OBSIDIAN_PROTOCOL', 'https').lower(),
+            host: str = str(os.getenv('OBSIDIAN_HOST', '127.0.0.1')),
             port: int = int(os.getenv('OBSIDIAN_PORT', '27124')),
             verify_ssl: bool = False,
         ):
         self.api_key = api_key
-        self.protocol = protocol
+        
+        if protocol == 'http':
+            self.protocol = 'http'
+        else:
+            self.protocol = 'https' # Default to https for any other value, including 'https'
+
         self.host = host
         self.port = port
         self.verify_ssl = verify_ssl
