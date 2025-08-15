@@ -1,5 +1,5 @@
 import argparse
-from .fast_tools import mcp
+from .tools import mcp
 
 
 def main():
