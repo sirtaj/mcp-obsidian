@@ -1,6 +1,11 @@
 import argparse
+import logging
+from typing import Literal, cast
 from .tools import mcp
 from . import constants
+
+# Type alias for transport modes
+Transport = Literal["stdio", "http", "sse"]
 
 
 def main():
@@ -25,12 +30,34 @@ def main():
         default=constants.DEFAULT_MCP_SERVER_PORT,
         help="The port for the MCP HTTP server.",
     )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable debug logging output.",
+    )
     args = parser.parse_args()
 
-    run_args = {
-        "transport": args.transport,
+    # Configure logging based on debug flag
+    log_level = logging.DEBUG if args.debug else logging.INFO
+    logging.basicConfig(
+        level=log_level,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
+    if args.debug:
+        logging.info("Debug logging enabled")
+        logging.debug(f"Starting MCP server with transport={args.transport}")
+        if args.transport != "stdio":
+            logging.debug(f"Server will listen on {args.host}:{args.port}")
+
+    # Cast transport to proper type for type checker
+    transport = cast(Transport, args.transport)
+
+    run_args: dict = {
+        "transport": transport,
     }
-    if args.transport != "stdio":
+    if transport != "stdio":
         run_args["host"] = args.host
         run_args["port"] = args.port
 

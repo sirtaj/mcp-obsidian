@@ -14,8 +14,8 @@ mcp = FastMCP(
     instructions=f"""
 Obsidian Vault Access via Local REST API
 
-TOOLS ({"19" if omnisearch_config.enabled else "18"} available):
-- File Operations: list, read, write, append, batch read, delete
+TOOLS ({"20" if omnisearch_config.enabled else "19"} available):
+- File Operations: list, read, write, append, batch read, delete, move/rename
 - Search: simple text search, complex JsonLogic queries, search by tags/frontmatter, folder search{", Omnisearch advanced search (with fuzzy matching, BM25 scoring)" if omnisearch_config.enabled else ""}
 - Content Patching: insert content relative to headings/blocks/frontmatter
 - Periodic Notes: access daily/weekly/monthly notes (requires Periodic Notes plugin)
@@ -196,6 +196,76 @@ def obsidian_delete_file(
         raise RuntimeError("confirm must be set to true to delete a file")
     api = _get_client()
     api.delete_file(filepath)
+
+
+@mcp.tool(
+    description="""Move or rename a file in the vault by copying content to a new location and deleting the original.
+
+    This operation:
+    1. Reads the source file content
+    2. Creates the destination file (with parent directories if needed)
+    3. Deletes the source file only if steps 1 and 2 succeed
+
+    Note: This does not preserve file metadata like creation dates. For simple renames within the same directory,
+    change only the filename portion of the path.""",
+)
+def obsidian_move_file(
+    source_path: Annotated[
+        str, Field(description="Current file path (relative to vault root)")
+    ],
+    destination_path: Annotated[
+        str, Field(description="New file path (relative to vault root)")
+    ],
+    confirm: Annotated[
+        bool, Field(description="Must be set to true to perform the move operation")
+    ] = False,
+) -> Annotated[
+    Dict[str, Any],
+    Field(description="Result with success status and message"),
+]:
+    if not confirm:
+        raise RuntimeError(
+            "confirm must be set to true to move a file (this will delete the source file)"
+        )
+
+    api = _get_client()
+
+    try:
+        # Step 1: Read source file content
+        content = api.get_file_contents(source_path)
+    except Exception as e:
+        raise RuntimeError(f"Failed to read source file '{source_path}': {str(e)}")
+
+    try:
+        # Step 2: Write to destination (automatically creates parent directories)
+        api.put_content(destination_path, content)
+    except Exception as e:
+        raise RuntimeError(
+            f"Failed to write to destination '{destination_path}': {str(e)}. "
+            f"Source file '{source_path}' was not deleted."
+        )
+
+    try:
+        # Step 3: Delete source file (only after successful write)
+        api.delete_file(source_path)
+    except Exception as e:
+        # Destination file was created but source deletion failed
+        # This is a partial failure state - inform the user
+        return {
+            "success": False,
+            "message": f"File was copied to '{destination_path}' but failed to delete source '{source_path}': {str(e)}. "
+            f"You may need to manually delete the source file.",
+            "source_path": source_path,
+            "destination_path": destination_path,
+            "partial_success": True,
+        }
+
+    return {
+        "success": True,
+        "message": f"Successfully moved '{source_path}' to '{destination_path}'",
+        "source_path": source_path,
+        "destination_path": destination_path,
+    }
 
 
 @mcp.tool(

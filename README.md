@@ -5,6 +5,7 @@ MCP server to interact with Obsidian via the Local REST API community plugin.
 ## THIS FORK
 
 **NOTE**: This is a fork that uses fastmcp instead of the old mcp library.
+It has been substantially rewritten.
 
 
 ### Running
@@ -15,8 +16,6 @@ mcp-obsidian --transport http --host 127.0.0.1 --port 37123
 
 Transport options are http, sse and stdio (the default). transport and port
 are optional and unused for stdio.
-
-The old README follows for historical purposes.
 
 ## Components
 
