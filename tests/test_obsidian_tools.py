@@ -30,15 +30,23 @@ class TestFileOperations:
         )
 
         assert result.data is not None
-        assert isinstance(result.data, list)
-        assert len(result.data) > 0
-        # Should contain some common vault directories or files
-        assert any(item.endswith('/') or item.endswith('.md') for item in result.data)
+        assert isinstance(result.data, dict)
+        assert "files" in result.data
+        assert "directories" in result.data
+        assert isinstance(result.data["files"], list)
+        assert isinstance(result.data["directories"], list)
+        # Should have at least some files or directories
+        assert len(result.data["files"]) > 0 or len(result.data["directories"]) > 0
 
-    async def test_list_files_in_dir(self, obsidian_client: Client[FastMCPTransport], vault_files: list[str]):
+    async def test_list_files_in_dir(self, obsidian_client: Client[FastMCPTransport]):
         """Test listing files in a specific directory."""
-        # Find a directory in the vault
-        directories = [f.rstrip('/') for f in vault_files if f.endswith('/')]
+        # First get directories from vault root
+        vault_result = await obsidian_client.call_tool(
+            name="obsidian_list_files_in_vault",
+            arguments={}
+        )
+
+        directories = vault_result.data["directories"]
 
         if not directories:
             pytest.skip("No directories found in vault root")
@@ -50,7 +58,11 @@ class TestFileOperations:
         )
 
         assert result.data is not None
-        assert isinstance(result.data, list)
+        assert isinstance(result.data, dict)
+        assert "files" in result.data
+        assert "directories" in result.data
+        assert isinstance(result.data["files"], list)
+        assert isinstance(result.data["directories"], list)
 
     async def test_list_files_in_nonexistent_dir(self, obsidian_client: Client[FastMCPTransport]):
         """Test that listing a non-existent directory raises an error."""
@@ -99,11 +111,21 @@ class TestFileOperations:
             arguments={"filepaths": md_files}
         )
 
-        assert result.data is not None
-        assert isinstance(result.data, str)
-        # Should contain headers for each file
-        for filepath in md_files:
-            assert f"# {filepath}" in result.data
+        # Access data from structured_content which has the properly serialized results
+        assert result.structured_content is not None
+        assert "result" in result.structured_content
+        results = result.structured_content["result"]
+        assert isinstance(results, list)
+        assert len(results) == len(md_files)
+
+        # Each result should be an object with path, content, and success
+        for item in results:
+            assert isinstance(item, dict)
+            assert "path" in item
+            assert "success" in item
+            if item["success"]:
+                assert "content" in item
+                assert isinstance(item["content"], str)
 
     async def test_batch_get_with_nonexistent_file(self, obsidian_client: Client[FastMCPTransport], vault_files: list[str]):
         """Test batch read with mix of existing and non-existent files (should handle gracefully)."""
@@ -120,9 +142,21 @@ class TestFileOperations:
             arguments={"filepaths": filepaths}
         )
 
-        assert result.data is not None
-        # Should contain error message for nonexistent file
-        assert "Error reading file" in result.data or "nonexistent-file-12345.md" in result.data
+        # Access data from structured_content which has the properly serialized results
+        assert result.structured_content is not None
+        assert "result" in result.structured_content
+        results = result.structured_content["result"]
+        assert isinstance(results, list)
+        assert len(results) == 2
+
+        # First file should succeed
+        assert results[0]["success"] is True
+        assert "content" in results[0]
+
+        # Second file should fail with error
+        assert results[1]["success"] is False
+        assert "error" in results[1]
+        assert results[1]["path"] == "nonexistent-file-12345.md"
 
 
 # ==============================================================================

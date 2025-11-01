@@ -17,11 +17,18 @@ async def test_list_files_format(obsidian_client: Client[FastMCPTransport]):
 
     print("\n=== list_files_in_vault ===")
     print(f"Type: {type(result.data)}")
-    print(f"Data: {result.data[:3]}")  # First 3 items
+    print(f"Keys: {result.data.keys()}")
+    print(f"Files (first 3): {result.data['files'][:3]}")
+    print(f"Directories (first 3): {result.data['directories'][:3]}")
 
-    assert isinstance(result.data, list)
-    assert all(isinstance(item, str) for item in result.data)
-    print("✅ PASS: Returns list of strings")
+    assert isinstance(result.data, dict)
+    assert "files" in result.data
+    assert "directories" in result.data
+    assert isinstance(result.data["files"], list)
+    assert isinstance(result.data["directories"], list)
+    assert all(isinstance(item, str) for item in result.data["files"])
+    assert all(isinstance(item, str) for item in result.data["directories"])
+    print("✅ PASS: Returns dict with 'files' and 'directories' arrays")
 
 
 async def test_get_file_format(obsidian_client: Client[FastMCPTransport], vault_files):
@@ -131,4 +138,4 @@ async def vault_files(obsidian_client: Client[FastMCPTransport]) -> list[str]:
         name="obsidian_list_files_in_vault",
         arguments={}
     )
-    return result.data
+    return result.data["files"]

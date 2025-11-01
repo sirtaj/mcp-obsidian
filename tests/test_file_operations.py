@@ -37,7 +37,7 @@ class TestFolderOperations:
             name="obsidian_list_files_in_dir",
             arguments={"dirpath": "test-folders/subfolder1/subfolder2"}
         )
-        assert "nested-file.md" in list_result.data
+        assert "nested-file.md" in list_result.data["files"]
 
     async def test_create_multiple_files_in_folder(self, obsidian_client: Client[FastMCPTransport]):
         """Test creating multiple files in the same folder."""
@@ -61,10 +61,10 @@ class TestFolderOperations:
             arguments={"dirpath": folder}
         )
 
-        assert "file1.md" in list_result.data
-        assert "file2.md" in list_result.data
-        assert "file3.md" in list_result.data
-        assert len(list_result.data) >= 3
+        assert "file1.md" in list_result.data["files"]
+        assert "file2.md" in list_result.data["files"]
+        assert "file3.md" in list_result.data["files"]
+        assert len(list_result.data["files"]) >= 3
 
     async def test_create_folder_hierarchy(self, obsidian_client: Client[FastMCPTransport]):
         """Test creating a complex folder hierarchy with files at different levels."""
@@ -87,15 +87,15 @@ class TestFolderOperations:
             name="obsidian_list_files_in_dir",
             arguments={"dirpath": "test-folders/hierarchy"}
         )
-        assert "README.md" in root_files.data
-        assert "level1/" in root_files.data
+        assert "README.md" in root_files.data["files"]
+        assert "level1" in root_files.data["directories"]
 
         level1_files = await obsidian_client.call_tool(
             name="obsidian_list_files_in_dir",
             arguments={"dirpath": "test-folders/hierarchy/level1"}
         )
-        assert "file.md" in level1_files.data
-        assert "level2/" in level1_files.data
+        assert "file.md" in level1_files.data["files"]
+        assert "level2" in level1_files.data["directories"]
 
 
 class TestFileEditWorkflows:
@@ -364,9 +364,9 @@ class TestFileMoveWorkflows:
             arguments={"dirpath": new_location}
         )
 
-        assert "doc1.md" in result.data
-        assert "doc2.md" in result.data
-        assert "doc3.md" in result.data
+        assert "doc1.md" in result.data["files"]
+        assert "doc2.md" in result.data["files"]
+        assert "doc3.md" in result.data["files"]
 
         # Verify content is intact
         for filename, expected_content in [("doc1.md", "# Document 1\n"),

@@ -25,26 +25,57 @@ mcp = FastMCP(name="ObsidianServer",
 if api_key == "":
     raise ValueError(f"OBSIDIAN_API_KEY environment variable required. Working directory: {os.getcwd()}")
 
+def _get_client() -> obsidian.Obsidian:
+    """Get configured Obsidian API client.
+
+    Returns:
+        Configured Obsidian client instance
+    """
+    return obsidian.Obsidian(
+        api_key=api_key,
+        protocol=obsidian_protocol,
+        host=obsidian_host,
+        port=obsidian_port
+    )
+
 TOOL_LIST_FILES_IN_VAULT = "obsidian_list_files_in_vault"
 TOOL_LIST_FILES_IN_DIR = "obsidian_list_files_in_dir"
 
 @mcp.tool(
     name=TOOL_LIST_FILES_IN_VAULT,
-    description="Lists all files and directories in the root directory of your Obsidian vault.",
+    description="Lists all files and directories in the root directory of your Obsidian vault. Returns a structured object with separate lists for files and directories.",
 )
-def obsidian_list_files_in_vault() -> Annotated[List[str], Field(description="A list of files and directories at the root of the vault")]:
-    api = obsidian.Obsidian(api_key=api_key, protocol=obsidian_protocol, host=obsidian_host, port=obsidian_port)
-    return api.list_files_in_vault()
+def obsidian_list_files_in_vault() -> Annotated[Dict[str, List[str]], Field(description="Object with 'files' and 'directories' arrays")]:
+    api = _get_client()
+    raw_list = api.list_files_in_vault()
+
+    # Separate files and directories
+    files = [item for item in raw_list if not item.endswith('/')]
+    directories = [item.rstrip('/') for item in raw_list if item.endswith('/')]
+
+    return {
+        "files": files,
+        "directories": directories
+    }
 
 @mcp.tool(
     name=TOOL_LIST_FILES_IN_DIR,
-    description="Lists all files and directories that exist in a specific Obsidian directory.",
+    description="Lists all files and directories that exist in a specific Obsidian directory. Returns a structured object with separate lists for files and directories.",
 )
 def obsidian_list_files_in_dir(
     dirpath: Annotated[str, Field(description="Directory path relative to the vault root (trailing slashes are automatically handled)")]
-) -> Annotated[List[str], Field(description="A list of files and directories in the specified directory")]:
-    api = obsidian.Obsidian(api_key=api_key, protocol=obsidian_protocol, host=obsidian_host, port=obsidian_port)
-    return api.list_files_in_dir(dirpath)
+) -> Annotated[Dict[str, List[str]], Field(description="Object with 'files' and 'directories' arrays")]:
+    api = _get_client()
+    raw_list = api.list_files_in_dir(dirpath)
+
+    # Separate files and directories
+    files = [item for item in raw_list if not item.endswith('/')]
+    directories = [item.rstrip('/') for item in raw_list if item.endswith('/')]
+
+    return {
+        "files": files,
+        "directories": directories
+    }
 
 @mcp.tool(
     name="obsidian_get_file_contents",
@@ -53,7 +84,7 @@ def obsidian_list_files_in_dir(
 def obsidian_get_file_contents(
     filepath: Annotated[str, Field(description="File path relative to the vault root")]
 ) -> Annotated[str, Field(description="The content of the file")]:
-    api = obsidian.Obsidian(api_key=api_key, protocol=obsidian_protocol, host=obsidian_host, port=obsidian_port)
+    api = _get_client()
     return api.get_file_contents(filepath)
 
 @mcp.tool(
@@ -71,7 +102,7 @@ def obsidian_simple_search(
     query: Annotated[str, Field(description="The search query")],
     context_length: Annotated[int, Field(description="Length of the context to return around each match")] = 100
 ) -> Annotated[List[Dict[str, Any]], Field(description="List of search results with filename, score, and matches")]:
-    api = obsidian.Obsidian(api_key=api_key, protocol=obsidian_protocol, host=obsidian_host, port=obsidian_port)
+    api = _get_client()
     results = api.search(query, context_length)
     formatted_results = []
     for result in results:
@@ -100,7 +131,7 @@ def obsidian_append_content(
     filepath: Annotated[str, Field(description="File path relative to the vault root")],
     content: Annotated[str, Field(description="The content to append")]
 ) -> Annotated[None, Field(description="The content was successfully appended")]:
-    api = obsidian.Obsidian(api_key=api_key, protocol=obsidian_protocol, host=obsidian_host, port=obsidian_port)
+    api = _get_client()
     api.append_content(filepath, content)
 
 @mcp.tool(
@@ -119,7 +150,7 @@ def obsidian_patch_content(
     target: Annotated[str, Field(description="The target identifier (e.g., heading text, block ID, or frontmatter key)")],
     content: Annotated[str, Field(description="The content to insert")]
 ) -> Annotated[None, Field(description="The content was successfully patched")]:
-    api = obsidian.Obsidian(api_key=api_key, protocol=obsidian_protocol, host=obsidian_host, port=obsidian_port)
+    api = _get_client()
     api.patch_content(filepath, operation, target_type, target, content)
 
 @mcp.tool(
@@ -130,7 +161,7 @@ def obsidian_put_content(
     filepath: Annotated[str, Field(description="File path relative to the vault root")],
     content: Annotated[str, Field(description="The content to write")]
 ) -> Annotated[None, Field(description="The content was successfully written")]:
-    api = obsidian.Obsidian(api_key=api_key, protocol=obsidian_protocol, host=obsidian_host, port=obsidian_port)
+    api = _get_client()
     api.put_content(filepath, content)
 
 @mcp.tool(
@@ -143,7 +174,7 @@ def obsidian_delete_file(
 ) -> Annotated[None, Field(description="The file was successfully deleted")]:
     if not confirm:
         raise RuntimeError("confirm must be set to true to delete a file")
-    api = obsidian.Obsidian(api_key=api_key, protocol=obsidian_protocol, host=obsidian_host, port=obsidian_port)
+    api = _get_client()
     api.delete_file(filepath)
 
 @mcp.tool(
@@ -179,25 +210,58 @@ def obsidian_delete_file(
 def obsidian_complex_search(
     query: Annotated[dict, Field(description="The JsonLogic query to execute")]
 ) -> Annotated[
-    List[Dict[str, Any]], Field(description="A list of files matching the search query")
+    List[Dict[str, Any]], Field(description="A list of files matching the search query with path and metadata")
 ]:
-    api = obsidian.Obsidian(api_key=api_key, protocol=obsidian_protocol, host=obsidian_host, port=obsidian_port)
-    return api.search_json(query)
+    api = _get_client()
+    raw_results = api.search_json(query)
+
+    # Transform results to ensure they're proper dictionaries
+    # The API may return objects that need conversion
+    results = []
+    for item in raw_results:
+        if isinstance(item, dict):
+            results.append(item)
+        elif hasattr(item, '__dict__'):
+            # Convert object to dict
+            results.append(vars(item))
+        elif hasattr(item, 'model_dump'):
+            # Pydantic model
+            results.append(item.model_dump())
+        else:
+            # Fallback: convert to string representation
+            results.append({"path": str(item)})
+
+    return results
 
 @mcp.tool(
     name="obsidian_batch_get_file_contents",
-    description="Return the contents of multiple files in your vault, concatenated with headers.",
+    description="Return the contents of multiple files in your vault as a structured array. Each element contains the file path, content, and success status.",
 )
 def obsidian_batch_get_file_contents(
     filepaths: Annotated[list[str], Field(description="List of file paths to read")]
 ) -> Annotated[
-    str,
-    Field(
-        description="The concatenated content of the files, each with a header indicating the file path"
-    ),
+    List[Dict[str, Any]],
+    Field(description="Array of objects with 'path', 'content', and 'success' fields")
 ]:
-    api = obsidian.Obsidian(api_key=api_key, protocol=obsidian_protocol, host=obsidian_host, port=obsidian_port)
-    return api.get_batch_file_contents(filepaths)
+    api = _get_client()
+    results = []
+
+    for filepath in filepaths:
+        try:
+            content = api.get_file_contents(filepath)
+            results.append({
+                "path": filepath,
+                "content": content,
+                "success": True
+            })
+        except Exception as e:
+            results.append({
+                "path": filepath,
+                "error": str(e),
+                "success": False
+            })
+
+    return results
 
 @mcp.tool(
     name="obsidian_get_periodic_note",
@@ -216,7 +280,7 @@ def obsidian_get_periodic_note(
     if type not in valid_types:
         raise RuntimeError(f"Invalid type: {type}. Must be one of: {', '.join(valid_types)}")
 
-    api = obsidian.Obsidian(api_key=api_key, protocol=obsidian_protocol, host=obsidian_host, port=obsidian_port)
+    api = _get_client()
     return api.get_periodic_note(period, type)
 
 @mcp.tool(
@@ -239,7 +303,7 @@ def obsidian_get_recent_periodic_notes(
     if not isinstance(include_content, bool):
         raise RuntimeError(f"Invalid include_content: {include_content}. Must be a boolean")
 
-    api = obsidian.Obsidian(api_key=api_key, protocol=obsidian_protocol, host=obsidian_host, port=obsidian_port)
+    api = _get_client()
     return api.get_recent_periodic_notes(period, limit, include_content)
 
 @mcp.tool(
@@ -258,5 +322,5 @@ def obsidian_get_recent_changes(
     if not isinstance(days, int) or days < 1:
         raise RuntimeError(f"Invalid days: {days}. Must be a positive integer")
 
-    api = obsidian.Obsidian(api_key=api_key, protocol=obsidian_protocol, host=obsidian_host, port=obsidian_port)
+    api = _get_client()
     return api.get_recent_changes(limit, days)
