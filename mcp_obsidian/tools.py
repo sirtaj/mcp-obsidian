@@ -41,7 +41,7 @@ def obsidian_list_files_in_vault() -> Annotated[List[str], Field(description="A 
     description="Lists all files and directories that exist in a specific Obsidian directory.",
 )
 def obsidian_list_files_in_dir(
-    dirpath: Annotated[str, Field(description="Directory path relative to the vault root")]
+    dirpath: Annotated[str, Field(description="Directory path relative to the vault root (trailing slashes are automatically handled)")]
 ) -> Annotated[List[str], Field(description="A list of files and directories in the specified directory")]:
     api = obsidian.Obsidian(api_key=api_key, protocol=obsidian_protocol, host=obsidian_host, port=obsidian_port)
     return api.list_files_in_dir(dirpath)
@@ -59,12 +59,18 @@ def obsidian_get_file_contents(
 @mcp.tool(
     name="obsidian_simple_search",
     description="""Simple search for documents matching a specified text query across all files in the vault.
-            Use this tool when you want to do a simple text search""",
+
+    Returns a list of search results, each containing:
+    - filename: The file path
+    - score: Relevance score (negative values, closer to 0 is more relevant)
+    - matches: Array of match objects with context and match_position (start/end)
+
+    Use this tool when you want to do a simple text search.""",
 )
 def obsidian_simple_search(
     query: Annotated[str, Field(description="The search query")],
     context_length: Annotated[int, Field(description="Length of the context to return around each match")] = 100
-) -> Annotated[List[Dict[str, Any]], Field(description="A list of search results, including filename, score, and matches")]:
+) -> Annotated[List[Dict[str, Any]], Field(description="List of search results with filename, score, and matches")]:
     api = obsidian.Obsidian(api_key=api_key, protocol=obsidian_protocol, host=obsidian_host, port=obsidian_port)
     results = api.search(query, context_length)
     formatted_results = []
@@ -88,7 +94,7 @@ def obsidian_simple_search(
 
 @mcp.tool(
     name="obsidian_append_content",
-    description="Append content to a new or existing file in the vault.",
+    description="Append content to the end of an existing file, or create a new file if it doesn't exist. Automatically creates parent directories if needed.",
 )
 def obsidian_append_content(
     filepath: Annotated[str, Field(description="File path relative to the vault root")],
@@ -99,13 +105,18 @@ def obsidian_append_content(
 
 @mcp.tool(
     name="obsidian_patch_content",
-    description="Insert content into an existing note relative to a heading, block reference, or frontmatter field.",
+    description="""Insert content into an existing note relative to a heading, block reference, or frontmatter field.
+
+    Valid operations: 'append', 'prepend', 'replace'
+    Valid target_types: 'heading', 'block', 'frontmatter'
+
+    Example: To append content after a heading named "Tasks", use operation='append', target_type='heading', target='Tasks'.""",
 )
 def obsidian_patch_content(
     filepath: Annotated[str, Field(description="File path relative to the vault root")],
-    operation: Annotated[str, Field(description="The patch operation to perform")],
-    target_type: Annotated[str, Field(description="The type of the target to patch")],
-    target: Annotated[str, Field(description="The target to patch")],
+    operation: Annotated[str, Field(description="The patch operation: 'append', 'prepend', or 'replace'")],
+    target_type: Annotated[str, Field(description="The target type: 'heading', 'block', or 'frontmatter'")],
+    target: Annotated[str, Field(description="The target identifier (e.g., heading text, block ID, or frontmatter key)")],
     content: Annotated[str, Field(description="The content to insert")]
 ) -> Annotated[None, Field(description="The content was successfully patched")]:
     api = obsidian.Obsidian(api_key=api_key, protocol=obsidian_protocol, host=obsidian_host, port=obsidian_port)
@@ -113,7 +124,7 @@ def obsidian_patch_content(
 
 @mcp.tool(
     name="obsidian_put_content",
-    description="Create a new file in your vault or update the content of an existing one in your vault.",
+    description="Create a new file or update an existing file in your vault. Automatically creates parent directories if they don't exist.",
 )
 def obsidian_put_content(
     filepath: Annotated[str, Field(description="File path relative to the vault root")],
@@ -190,7 +201,7 @@ def obsidian_batch_get_file_contents(
 
 @mcp.tool(
     name="obsidian_get_periodic_note",
-    description="Get current periodic note for the specified period.",
+    description="Get current periodic note for the specified period. REQUIRES the Periodic Notes plugin with the requested period type enabled in Obsidian.",
 )
 def obsidian_get_periodic_note(
     period: Annotated[str, Field(description="The period type (daily, weekly, monthly, quarterly, yearly)")],
@@ -210,7 +221,7 @@ def obsidian_get_periodic_note(
 
 @mcp.tool(
     name="obsidian_get_recent_periodic_notes",
-    description="Get most recent periodic notes for the specified period type.",
+    description="Get most recent periodic notes for the specified period type. REQUIRES the Periodic Notes plugin with the requested period type enabled in Obsidian.",
 )
 def obsidian_get_recent_periodic_notes(
     period: Annotated[str, Field(description="The period type (daily, weekly, monthly, quarterly, yearly)")],
@@ -233,7 +244,7 @@ def obsidian_get_recent_periodic_notes(
 
 @mcp.tool(
     name="obsidian_get_recent_changes",
-    description="Get recently modified files in the vault.",
+    description="Get recently modified files in the vault. REQUIRES the Dataview plugin to be installed and enabled in Obsidian.",
 )
 def obsidian_get_recent_changes(
     limit: Annotated[int, Field(description="Maximum number of files to return")] = 10,

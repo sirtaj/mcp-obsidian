@@ -57,6 +57,8 @@ class Obsidian():
 
 
     def list_files_in_dir(self, dirpath: str) -> list[str]:
+        # Strip trailing slash to avoid double slashes in URL
+        dirpath = dirpath.rstrip('/')
         url = f"{self.get_base_url()}/vault/{dirpath}/"
 
         def call_fn():
