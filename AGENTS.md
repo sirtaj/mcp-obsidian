@@ -1,0 +1,526 @@
+# AGENTS.md - MCP Obsidian Server Maintenance Guide
+
+This file provides guidance for AI assistants and developers working on this codebase.
+
+## Project Overview
+
+**Name:** mcp-obsidian
+**Type:** Model Context Protocol (MCP) server for Obsidian vault access
+**Framework:** FastMCP 2.0+
+**Language:** Python 3.11+
+**Purpose:** Provides programmatic access to Obsidian vaults via the Local REST API plugin
+
+This is a modernized fork that migrated from the legacy `mcp` library to `fastmcp 2.0+`.
+
+## Architecture
+
+### Three-Layer Architecture
+
+```
+┌─────────────────────────────────────────┐
+│  CLI Layer (server.py)                  │
+│  - Argument parsing                     │
+│  - Transport mode selection             │
+└──────────────┬──────────────────────────┘
+               │
+┌──────────────▼──────────────────────────┐
+│  Tools Layer (tools.py)                 │
+│  - FastMCP server initialization        │
+│  - 14 tool registrations                │
+│  - Environment config loading           │
+└──────────────┬──────────────────────────┘
+               │
+┌──────────────▼──────────────────────────┐
+│  API Client Layer (obsidian.py)         │
+│  - HTTP communication                   │
+│  - Error handling                       │
+│  - 11 REST API methods                  │
+└─────────────────────────────────────────┘
+```
+
+### Core Files
+
+| File | Purpose | Lines | Key Responsibilities |
+|------|---------|-------|---------------------|
+| `mcp_obsidian/server.py` | Entry point | ~50 | CLI argument parsing, transport mode handling |
+| `mcp_obsidian/tools.py` | Tool registry | ~400 | All 14 MCP tool definitions, FastMCP server config |
+| `mcp_obsidian/obsidian.py` | API client | ~200 | HTTP communication with Obsidian Local REST API |
+
+### Tool Categories
+
+The server provides 14 tools organized into 5 categories:
+
+1. **File Operations** (6 tools)
+   - List vault/directory contents
+   - Read single/batch files
+   - Append/overwrite content
+
+2. **Content Patching** (1 tool)
+   - Insert content relative to headings/blocks/frontmatter
+
+3. **File Deletion** (1 tool)
+   - Delete files/directories (with safety confirmation)
+
+4. **Search Operations** (2 tools)
+   - Simple text search
+   - Complex JsonLogic queries
+
+5. **Periodic Notes** (2 tools) + Recent Changes (1 tool)
+   - Get current/recent periodic notes
+   - Track recent file modifications
+
+## Key Design Patterns
+
+### 1. Stateless Tool Execution
+
+Each tool creates a fresh `Obsidian()` client instance. No shared state between calls.
+
+```python
+@mcp.tool()
+def obsidian_list_files_in_vault() -> list[str]:
+    obs = Obsidian(...)  # Fresh instance per call
+    return obs.list_files_in_vault()
+```
+
+### 2. Error Handling Pattern
+
+The `Obsidian._safe_call()` wrapper handles all API errors gracefully:
+
+```python
+def _safe_call(self, fn: Callable[..., T]) -> T:
+    try:
+        return fn()
+    except requests.HTTPError as e:
+        # Parse JSON error response
+    except requests.exceptions.RequestException as e:
+        # Generic request failures
+```
+
+**Important:** Batch operations continue on individual failures (resilient design).
+
+### 3. Type Annotations with Documentation
+
+All tools use `Annotated` types with Pydantic `Field` for inline documentation:
+
+```python
+def obsidian_get_file_contents(
+    filepath: Annotated[str, Field(description="The path to the file...")]
+) -> str:
+```
+
+This provides rich type hints AND user-facing documentation.
+
+### 4. Environment-Based Configuration
+
+Configuration loaded via `python-dotenv`:
+
+```python
+api_key = os.getenv("OBSIDIAN_API_KEY")  # Required
+host = os.getenv("OBSIDIAN_HOST", "127.0.0.1")  # Optional with default
+```
+
+No config files needed beyond `.env`.
+
+## Common Maintenance Tasks
+
+### Adding a New Tool
+
+1. **Add API method to `obsidian.py`:**
+   ```python
+   def new_api_method(self, param: str) -> dict:
+       return self._safe_call(lambda: ...)
+   ```
+
+2. **Register tool in `tools.py`:**
+   ```python
+   @mcp.tool()
+   def obsidian_new_tool(
+       param: Annotated[str, Field(description="...")]
+   ) -> dict:
+       obs = Obsidian(api_key, host, port, protocol)
+       return obs.new_api_method(param)
+   ```
+
+3. **Update README.md** with usage examples
+
+4. **Test with Claude Desktop** or `mcp dev`
+
+### Updating Dependencies
+
+```bash
+# Add new dependency
+uv add package-name
+
+# Update fastmcp (important for MCP spec updates)
+uv add fastmcp@latest
+
+# Regenerate lockfile
+uv lock
+```
+
+### Modifying the API Client
+
+When changing `obsidian.py`:
+
+1. **Consult `openapi.yaml`** for correct endpoint specs
+2. **Maintain the `_safe_call()` wrapper** for all HTTP operations
+3. **Use appropriate HTTP methods:**
+   - GET: Reading data
+   - POST: Creating/searching
+   - PUT: Overwriting
+   - PATCH: Partial updates
+   - DELETE: Removing
+
+4. **Keep SSL verification disabled** (Obsidian uses self-signed certs):
+   ```python
+   response = requests.get(..., verify=False)
+   ```
+
+### Refactoring Magic Numbers (Per User Guidelines)
+
+The user's global instructions specify avoiding magic numbers. Current candidates:
+
+**In `obsidian.py`:**
+```python
+# Current (magic numbers)
+DEFAULT_PORT = 27124
+DEFAULT_TIMEOUT = (3, 6)  # (connect, read) timeout
+SSL_VERIFY = False
+
+# Suggested constants at module level
+DEFAULT_OBSIDIAN_PORT = 27124
+CONNECTION_TIMEOUT_SECONDS = 3
+READ_TIMEOUT_SECONDS = 6
+DEFAULT_TIMEOUT_TUPLE = (CONNECTION_TIMEOUT_SECONDS, READ_TIMEOUT_SECONDS)
+OBSIDIAN_SSL_VERIFY = False
+```
+
+**In `tools.py`:**
+```python
+# Current (magic numbers)
+DEFAULT_CONTEXT_LENGTH = 100
+DEFAULT_PERIODIC_NOTE_LIMIT = 5
+DEFAULT_RECENT_CHANGES_LIMIT = 10
+DEFAULT_RECENT_CHANGES_DAYS = 90
+DEFAULT_MCP_SERVER_PORT = 37123
+
+# Suggested constants at module level
+SEARCH_DEFAULT_CONTEXT_LENGTH = 100
+PERIODIC_NOTES_DEFAULT_LIMIT = 5
+RECENT_CHANGES_DEFAULT_LIMIT = 10
+RECENT_CHANGES_DEFAULT_DAYS = 90
+MCP_SERVER_DEFAULT_PORT = 37123
+
+VALID_PERIOD_TYPES = ["daily", "weekly", "monthly", "quarterly", "yearly"]
+VALID_PERIODIC_NOTE_TYPES = ["content", "metadata"]
+```
+
+**When refactoring:** Extract constants to module level with clear, descriptive names.
+
+## Testing Strategy
+
+### Manual Testing with Claude Desktop
+
+1. **Add to Claude Desktop config:**
+   ```json
+   {
+     "mcpServers": {
+       "obsidian": {
+         "command": "uv",
+         "args": ["run", "mcp-obsidian"],
+         "env": {
+           "OBSIDIAN_API_KEY": "your_key_here"
+         }
+       }
+     }
+   }
+   ```
+
+2. **Test each tool category:**
+   - File operations: List, read, write, append
+   - Search: Simple and complex queries
+   - Periodic notes: Daily/weekly/monthly access
+   - Delete: Verify confirmation requirement
+
+3. **Check error handling:**
+   - Invalid file paths (should fail gracefully)
+   - Missing API key (should error clearly)
+   - Network issues (should handle timeouts)
+
+### Development Testing
+
+```bash
+# Run with stdio (default)
+uv run mcp-obsidian
+
+# Run with HTTP for debugging
+uv run mcp-obsidian --transport http --port 8080
+
+# Type checking
+uv run pyright mcp_obsidian/
+```
+
+## Important Gotchas
+
+### 1. SSL Verification Disabled
+
+The Obsidian Local REST API uses self-signed certificates. **Do not enable SSL verification** or requests will fail:
+
+```python
+# Correct
+response = requests.get(url, verify=False)
+
+# Wrong - will fail with SSL errors
+response = requests.get(url, verify=True)
+```
+
+### 2. Delete Tool Safety
+
+`obsidian_delete_file()` requires explicit confirmation to prevent accidents:
+
+```python
+# Won't work
+delete_file("important.md")  # Raises RuntimeError
+
+# Correct
+delete_file("important.md", confirm=True)
+```
+
+This is intentional - deletes are destructive and irreversible.
+
+### 3. Period Type Validation
+
+Periodic note tools only accept specific period types:
+
+```python
+VALID_PERIODS = ["daily", "weekly", "monthly", "quarterly", "yearly"]
+```
+
+Any other value will raise `ValueError`.
+
+### 4. Batch Operations Continue on Errors
+
+`obsidian_batch_get_file_contents()` doesn't fail if one file errors:
+
+```python
+# If file2.md doesn't exist, you still get file1.md and file3.md
+results = batch_get(["file1.md", "file2.md", "file3.md"])
+```
+
+Check the returned content for individual error messages.
+
+### 5. File Paths are Vault-Relative
+
+All file paths are relative to the vault root, not absolute system paths:
+
+```python
+# Correct
+get_file_contents("Notes/Meeting.md")
+
+# Wrong
+get_file_contents("/Users/me/Vault/Notes/Meeting.md")
+```
+
+### 6. FastMCP 2.0+ Required
+
+This fork **does not work** with the legacy `mcp` library. Always use `fastmcp >= 2.11.2`:
+
+```toml
+# Correct
+dependencies = ["fastmcp>=2.11.2", ...]
+
+# Won't work
+dependencies = ["mcp", ...]  # Old library
+```
+
+## API Reference
+
+### Obsidian REST API Plugin Endpoints
+
+The `obsidian.py` client wraps these endpoints:
+
+| Method | Endpoint | Purpose | Tool |
+|--------|----------|---------|------|
+| GET | `/vault/` | List vault root | `list_files_in_vault` |
+| GET | `/vault/{dirpath}/` | List directory | `list_files_in_dir` |
+| GET | `/vault/{filepath}` | Read file | `get_file_contents` |
+| POST | `/vault/{filepath}` | Append content | `append_content` |
+| PUT | `/vault/{filepath}` | Overwrite file | `put_content` |
+| PATCH | `/vault/{filepath}` | Patch content | `patch_content` |
+| DELETE | `/vault/{filepath}` | Delete file/dir | `delete_file` |
+| POST | `/search/simple/` | Text search | `simple_search` |
+| POST | `/search/` | JsonLogic/DQL search | `complex_search`, `get_recent_changes` |
+| GET | `/periodic/{period}/` | Current periodic note | `get_periodic_note` |
+| GET | `/periodic/{period}/recent` | Recent periodic notes | `get_recent_periodic_notes` |
+
+Full API spec available in `openapi.yaml`.
+
+### Environment Variables
+
+| Variable | Required | Default | Purpose |
+|----------|----------|---------|---------|
+| `OBSIDIAN_API_KEY` | Yes | - | Bearer token from Local REST API plugin |
+| `OBSIDIAN_HOST` | No | `127.0.0.1` | Obsidian server host |
+| `OBSIDIAN_PORT` | No | `27124` | Obsidian server port |
+| `OBSIDIAN_PROTOCOL` | No | `https` | HTTP or HTTPS |
+
+## Code Quality Guidelines
+
+### 1. Type Hints
+
+Always provide complete type hints:
+
+```python
+# Good
+def process_files(paths: list[str]) -> dict[str, Any]:
+    ...
+
+# Bad
+def process_files(paths):
+    ...
+```
+
+### 2. Docstrings in Tool Descriptions
+
+Use `Field(description=...)` for user-facing documentation:
+
+```python
+@mcp.tool()
+def my_tool(
+    param: Annotated[str, Field(description="Clear explanation of what this parameter does")]
+) -> str:
+    """Optional internal docstring for developers."""
+```
+
+### 3. Error Messages
+
+Provide clear, actionable error messages:
+
+```python
+# Good
+raise ValueError(f"Invalid period type '{period}'. Must be one of: {VALID_PERIODS}")
+
+# Bad
+raise ValueError("Invalid period")
+```
+
+### 4. Consistent Naming
+
+- Tools: `obsidian_verb_noun` (e.g., `obsidian_get_file_contents`)
+- API methods: `verb_noun` (e.g., `get_file_contents`)
+- Constants: `SCREAMING_SNAKE_CASE` (e.g., `DEFAULT_PORT`)
+- Variables: `snake_case` (e.g., `api_key`)
+
+### 5. Avoid Magic Numbers
+
+Extract numeric literals to named constants (per user global instructions):
+
+```python
+# Good
+DEFAULT_LIMIT = 10
+results = search(limit=DEFAULT_LIMIT)
+
+# Bad
+results = search(limit=10)
+```
+
+## Extending the System
+
+### Adding Support for New Obsidian API Features
+
+1. **Check `openapi.yaml`** for new endpoints
+2. **Add method to `Obsidian` class** in `obsidian.py`
+3. **Wrap with `_safe_call()`** for error handling
+4. **Register as MCP tool** in `tools.py`
+5. **Test with actual Obsidian vault**
+6. **Update README.md** with examples
+
+### Adding New Transport Modes
+
+FastMCP supports custom transports. To add one:
+
+1. **Update `server.py` argument parser:**
+   ```python
+   parser.add_argument("--transport", choices=["stdio", "http", "sse", "new_mode"])
+   ```
+
+2. **Add to transport mapping:**
+   ```python
+   transport_map = {
+       "stdio": mcp.settings.stdio_transport(),
+       "http": mcp.settings.http_transport(host, port),
+       "sse": mcp.settings.sse_transport(host, port),
+       "new_mode": custom_transport_config(),
+   }
+   ```
+
+3. **Test with MCP client**
+
+### Supporting Multiple Vaults
+
+Currently, the server connects to one vault per instance. To support multiple:
+
+1. **Add vault selection parameter** to each tool
+2. **Pass vault-specific config** to `Obsidian()` constructor
+3. **Update environment config** to support multiple API keys/hosts
+4. **Consider vault naming/aliasing** for user clarity
+
+## File Manifest
+
+```
+/home/sirtaj/proj/mcp-obsidian/
+├── mcp_obsidian/
+│   ├── __init__.py           # Empty package marker
+│   ├── server.py             # CLI entry point (~50 lines)
+│   ├── tools.py              # 14 MCP tools (~400 lines)
+│   └── obsidian.py           # REST API client (~200 lines)
+├── pyproject.toml            # Project metadata, dependencies
+├── uv.lock                   # Locked dependencies
+├── openapi.yaml              # Obsidian API specification
+├── README.md                 # User documentation
+├── LICENSE                   # MIT License
+├── .gitignore                # Python ignore patterns
+└── AGENTS.md                 # This file
+```
+
+## Resources
+
+- **FastMCP Documentation:** https://github.com/jlowin/fastmcp
+- **MCP Specification:** https://modelcontextprotocol.io/
+- **Obsidian Local REST API Plugin:** https://github.com/coddingtonbear/obsidian-local-rest-api
+- **openapi.yaml:** Complete API specification in this repo
+
+## Quick Command Reference
+
+```bash
+# Installation
+uv sync
+
+# Run server (stdio mode for Claude Desktop)
+uv run mcp-obsidian
+
+# Run with HTTP for debugging
+uv run mcp-obsidian --transport http --port 8080
+
+# Type checking
+uv run pyright mcp_obsidian/
+
+# Add dependency
+uv add package-name
+
+# Update dependencies
+uv lock --upgrade
+```
+
+## Version History Notes
+
+- **v0.2.1** (current): Modern fastmcp 2.0+ implementation
+- **v0.1.x**: Legacy mcp library (deprecated)
+
+This fork represents a complete modernization to fastmcp 2.0+. Do not attempt to use old mcp library patterns.
+
+---
+
+**Last Updated:** 2025-11-01
+**Codebase Version:** 0.2.1
+**FastMCP Version:** 2.11.2+
