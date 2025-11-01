@@ -2,7 +2,7 @@
 Tests for metadata resources and search tools.
 
 This test suite covers:
-- Metadata resources (4 resources)
+- Metadata resources (2 resources)
 - Tag search tool
 - Frontmatter search tool
 - List all tags tool
@@ -384,14 +384,6 @@ This file tests the complete metadata and search workflow.
             assert "metadata-test" in metadata['tags']
             assert metadata['frontmatter']['title'] == "Integration Test"
             assert metadata['frontmatter']['status'] == "testing"
-
-            # Access tags via resource
-            tags_result = await obsidian_client.read_resource(
-                uri=f"obsidian://vault/{test_file}/tags"
-            )
-            tags = parse_resource_data(tags_result)
-            assert "integration" in tags
-            assert "metadata-test" in tags
 
             # Search by frontmatter
             frontmatter_result = await obsidian_client.call_tool(
