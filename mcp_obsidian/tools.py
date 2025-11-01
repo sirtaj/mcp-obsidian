@@ -3,7 +3,7 @@ __all__ = ["mcp"]
 
 import os
 from typing import Any, Annotated, List, Dict
-from . import obsidian
+from . import obsidian, omnisearch
 from fastmcp import FastMCP
 from pydantic import Field
 from dotenv import load_dotenv
@@ -11,25 +11,32 @@ from dotenv import load_dotenv
 # Load environment variables from .env file
 load_dotenv()
 
+# Obsidian REST API configuration
 api_key = os.getenv("OBSIDIAN_API_KEY", "")
 obsidian_host = os.getenv("OBSIDIAN_HOST", "127.0.0.1")
 obsidian_protocol = os.getenv("OBSIDIAN_PROTOCOL", "https")
 obsidian_port = int(os.getenv("OBSIDIAN_PORT", "27124"))
 
+# Omnisearch configuration (optional)
+omnisearch_enabled = os.getenv("OMNISEARCH_ENABLED", "false").lower() == "true"
+omnisearch_host = os.getenv("OMNISEARCH_HOST", obsidian_host)
+omnisearch_protocol = os.getenv("OMNISEARCH_PROTOCOL", omnisearch.DEFAULT_OMNISEARCH_PROTOCOL)
+omnisearch_port = int(os.getenv("OMNISEARCH_PORT", str(omnisearch.DEFAULT_OMNISEARCH_PORT)))
+
 mcp = FastMCP(name="ObsidianServer",
-              instructions="""
+              instructions=f"""
 Obsidian Vault Access via Local REST API
 
-TOOLS (18 available):
+TOOLS ({'19' if omnisearch_enabled else '18'} available):
 - File Operations: list, read, write, append, batch read, delete
-- Search: simple text search, complex JsonLogic queries, search by tags/frontmatter, folder search
+- Search: simple text search, complex JsonLogic queries, search by tags/frontmatter, folder search{', Omnisearch advanced search (with fuzzy matching, BM25 scoring)' if omnisearch_enabled else ''}
 - Content Patching: insert content relative to headings/blocks/frontmatter
 - Periodic Notes: access daily/weekly/monthly notes (requires Periodic Notes plugin)
 - Recent Changes: track file modifications (requires Dataview plugin)
 
 RESOURCES (2 available):
-- obsidian://vault/{filepath}/metadata - Complete file metadata (content, frontmatter, tags, stats)
-- obsidian://vault/{filepath}/content - File content only (plain text)
+- obsidian://vault/{{filepath}}/metadata - Complete file metadata (content, frontmatter, tags, stats)
+- obsidian://vault/{{filepath}}/content - File content only (plain text)
 
 PATH CONVENTIONS:
 - All file paths are relative to vault root (e.g., "Notes/meeting.md", not "/full/path/to/vault/Notes/meeting.md")
@@ -46,6 +53,9 @@ IMPORTANT:
 if api_key == "":
     raise ValueError(f"OBSIDIAN_API_KEY environment variable required. Working directory: {os.getcwd()}")
 
+# Constants for Omnisearch (following user guideline: avoid magic numbers)
+OMNISEARCH_TOOL_NAME = "obsidian_omnisearch_search"
+
 def _get_client() -> obsidian.Obsidian:
     """Get configured Obsidian API client.
 
@@ -57,6 +67,18 @@ def _get_client() -> obsidian.Obsidian:
         protocol=obsidian_protocol,
         host=obsidian_host,
         port=obsidian_port
+    )
+
+def _get_omnisearch_client() -> omnisearch.OmnisearchClient:
+    """Get configured Omnisearch client.
+
+    Returns:
+        Configured Omnisearch client instance
+    """
+    return omnisearch.OmnisearchClient(
+        host=omnisearch_host,
+        port=omnisearch_port,
+        protocol=omnisearch_protocol
     )
 
 TOOL_LIST_FILES_IN_VAULT = "obsidian_list_files_in_vault"
@@ -468,3 +490,38 @@ def obsidian_search_folders(
 ]:
     api = _get_client()
     return api.search_folders(folder_name, root_path)
+
+# ==============================================================================
+# Omnisearch Integration (Optional - Conditional Registration)
+# ==============================================================================
+
+if omnisearch_enabled:
+    @mcp.tool(
+        name=OMNISEARCH_TOOL_NAME,
+        description="""Search vault using Omnisearch plugin's advanced search engine.
+
+        Omnisearch provides enhanced full-text search with:
+        - Fuzzy matching for typo-tolerant searches
+        - BM25 relevance scoring (industry-standard ranking algorithm)
+        - OCR support for searching text in images
+        - PDF indexing and search
+        - Recency boosting for recently modified files
+        - Intelligent tokenization
+
+        REQUIRES: Omnisearch plugin with HTTP server enabled in settings.
+
+        This is more powerful than the basic obsidian_simple_search for:
+        - Finding content with typos or variations
+        - Ranking results by relevance
+        - Searching within PDFs and images (if OCR enabled)
+
+        Returns detailed search results with relevance scores and context.""",
+    )
+    def obsidian_omnisearch_search(
+        query: Annotated[str, Field(description="Search query string (supports typos, variations)")]
+    ) -> Annotated[
+        List[Dict[str, Any]],
+        Field(description="List of search results with relevance scoring from Omnisearch")
+    ]:
+        client = _get_omnisearch_client()
+        return client.search(query)

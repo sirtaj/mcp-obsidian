@@ -50,10 +50,11 @@ async def vault_files(obsidian_client: Client[FastMCPTransport]) -> list[str]:
         obsidian_client: The MCP client fixture
 
     Returns:
-        List of file/directory names in vault root
+        List of file names (only files, not directories)
     """
     result = await obsidian_client.call_tool(
         name="obsidian_list_files_in_vault",
         arguments={}
     )
-    return result.data
+    # New structured response has "files" and "directories" keys
+    return result.data["files"]
