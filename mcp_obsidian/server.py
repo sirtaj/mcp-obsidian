@@ -1,5 +1,6 @@
 import argparse
 from .tools import mcp
+from . import constants
 
 
 def main():
@@ -15,11 +16,14 @@ def main():
     parser.add_argument(
         "--host",
         type=str,
-        default="127.0.0.1",
+        default=constants.DEFAULT_OBSIDIAN_HOST,
         help="The host address for the MCP HTTP server.",
     )
     parser.add_argument(
-        "--port", type=int, default=37123, help="The port for the MCP HTTP server."
+        "--port",
+        type=int,
+        default=constants.DEFAULT_MCP_SERVER_PORT,
+        help="The port for the MCP HTTP server.",
     )
     args = parser.parse_args()
 

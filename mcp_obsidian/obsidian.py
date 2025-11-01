@@ -1,36 +1,37 @@
 import requests
 import urllib.parse
-import os
 from typing import Any
+from . import constants
 
-class Obsidian():
+
+class Obsidian:
     def __init__(
-            self,
-            api_key: str,
-            protocol: str = os.getenv('OBSIDIAN_PROTOCOL', 'https').lower(),
-            host: str = str(os.getenv('OBSIDIAN_HOST', '127.0.0.1')),
-            port: int = int(os.getenv('OBSIDIAN_PORT', '27124')),
-            verify_ssl: bool = False,
-        ):
+        self,
+        api_key: str,
+        protocol: str = constants.DEFAULT_OBSIDIAN_PROTOCOL,
+        host: str = constants.DEFAULT_OBSIDIAN_HOST,
+        port: int = constants.DEFAULT_OBSIDIAN_PORT,
+        verify_ssl: bool = constants.OBSIDIAN_SSL_VERIFY,
+    ):
         self.api_key = api_key
 
-        if protocol == 'http':
-            self.protocol = 'http'
+        if protocol == "http":
+            self.protocol = "http"
         else:
-            self.protocol = 'https' # Default to https for any other value, including 'https'
+            self.protocol = (
+                "https"  # Default to https for any other value, including 'https'
+            )
 
         self.host = host
         self.port = port
         self.verify_ssl = verify_ssl
-        self.timeout = (3, 6)
+        self.timeout = constants.DEFAULT_TIMEOUT
 
     def get_base_url(self) -> str:
-        return f'{self.protocol}://{self.host}:{self.port}'
+        return f"{self.protocol}://{self.host}:{self.port}"
 
     def _get_headers(self) -> dict:
-        headers = {
-            'Authorization': f'Bearer {self.api_key}'
-        }
+        headers = {"Authorization": f"Bearer {self.api_key}"}
         return headers
 
     def _safe_call(self, f) -> Any:
@@ -38,8 +39,8 @@ class Obsidian():
             return f()
         except requests.HTTPError as e:
             error_data = e.response.json() if e.response.content else {}
-            code = error_data.get('errorCode', -1)
-            message = error_data.get('message', '<unknown>')
+            code = error_data.get("errorCode", -1)
+            message = error_data.get("message", "<unknown>")
             raise Exception(f"Error {code}: {message}")
         except requests.exceptions.RequestException as e:
             raise Exception(f"Request failed: {str(e)}")
@@ -48,24 +49,33 @@ class Obsidian():
         url = f"{self.get_base_url()}/vault/"
 
         def call_fn():
-            response = requests.get(url, headers=self._get_headers(), verify=self.verify_ssl, timeout=self.timeout)
+            response = requests.get(
+                url,
+                headers=self._get_headers(),
+                verify=self.verify_ssl,
+                timeout=self.timeout,
+            )
             response.raise_for_status()
 
-            return response.json()['files']
+            return response.json()["files"]
 
         return self._safe_call(call_fn)
 
-
     def list_files_in_dir(self, dirpath: str) -> list[str]:
         # Strip trailing slash to avoid double slashes in URL
-        dirpath = dirpath.rstrip('/')
+        dirpath = dirpath.rstrip("/")
         url = f"{self.get_base_url()}/vault/{dirpath}/"
 
         def call_fn():
-            response = requests.get(url, headers=self._get_headers(), verify=self.verify_ssl, timeout=self.timeout)
+            response = requests.get(
+                url,
+                headers=self._get_headers(),
+                verify=self.verify_ssl,
+                timeout=self.timeout,
+            )
             response.raise_for_status()
 
-            return response.json()['files']
+            return response.json()["files"]
 
         return self._safe_call(call_fn)
 
@@ -73,7 +83,12 @@ class Obsidian():
         url = f"{self.get_base_url()}/vault/{filepath}"
 
         def call_fn():
-            response = requests.get(url, headers=self._get_headers(), verify=self.verify_ssl, timeout=self.timeout)
+            response = requests.get(
+                url,
+                headers=self._get_headers(),
+                verify=self.verify_ssl,
+                timeout=self.timeout,
+            )
             response.raise_for_status()
 
             return response.text
@@ -97,19 +112,24 @@ class Obsidian():
                 result.append(f"# {filepath}\n\n{content}\n\n---\n\n")
             except Exception as e:
                 # Add error message but continue processing other files
-                result.append(f"# {filepath}\n\nError reading file: {str(e)}\n\n---\n\n")
+                result.append(
+                    f"# {filepath}\n\nError reading file: {str(e)}\n\n---\n\n"
+                )
 
         return "".join(result)
 
     def search(self, query: str, context_length: int = 100) -> list[dict[str, Any]]:
         url = f"{self.get_base_url()}/search/simple/"
-        params = {
-            'query': query,
-            'contextLength': context_length
-        }
+        params = {"query": query, "contextLength": context_length}
 
         def call_fn():
-            response = requests.post(url, headers=self._get_headers(), params=params, verify=self.verify_ssl, timeout=self.timeout)
+            response = requests.post(
+                url,
+                headers=self._get_headers(),
+                params=params,
+                verify=self.verify_ssl,
+                timeout=self.timeout,
+            )
             response.raise_for_status()
             return response.json()
 
@@ -121,28 +141,36 @@ class Obsidian():
         def call_fn():
             response = requests.post(
                 url,
-                headers=self._get_headers() | {'Content-Type': 'text/markdown'},
+                headers=self._get_headers() | {"Content-Type": "text/markdown"},
                 data=content,
                 verify=self.verify_ssl,
-                timeout=self.timeout
+                timeout=self.timeout,
             )
             response.raise_for_status()
             return None
 
         return self._safe_call(call_fn)
 
-    def patch_content(self, filepath: str, operation: str, target_type: str, target: str, content: str) -> None:
+    def patch_content(
+        self, filepath: str, operation: str, target_type: str, target: str, content: str
+    ) -> None:
         url = f"{self.get_base_url()}/vault/{filepath}"
 
         headers = self._get_headers() | {
-            'Content-Type': 'text/markdown',
-            'Operation': operation,
-            'Target-Type': target_type,
-            'Target': urllib.parse.quote(target)
+            "Content-Type": "text/markdown",
+            "Operation": operation,
+            "Target-Type": target_type,
+            "Target": urllib.parse.quote(target),
         }
 
         def call_fn():
-            response = requests.patch(url, headers=headers, data=content, verify=self.verify_ssl, timeout=self.timeout)
+            response = requests.patch(
+                url,
+                headers=headers,
+                data=content,
+                verify=self.verify_ssl,
+                timeout=self.timeout,
+            )
             response.raise_for_status()
             return None
 
@@ -154,10 +182,10 @@ class Obsidian():
         def call_fn():
             response = requests.put(
                 url,
-                headers=self._get_headers() | {'Content-Type': 'text/markdown'},
+                headers=self._get_headers() | {"Content-Type": "text/markdown"},
                 data=content,
                 verify=self.verify_ssl,
-                timeout=self.timeout
+                timeout=self.timeout,
             )
             response.raise_for_status()
             return None
@@ -176,7 +204,12 @@ class Obsidian():
         url = f"{self.get_base_url()}/vault/{filepath}"
 
         def call_fn():
-            response = requests.delete(url, headers=self._get_headers(), verify=self.verify_ssl, timeout=self.timeout)
+            response = requests.delete(
+                url,
+                headers=self._get_headers(),
+                verify=self.verify_ssl,
+                timeout=self.timeout,
+            )
             response.raise_for_status()
             return None
 
@@ -186,11 +219,17 @@ class Obsidian():
         url = f"{self.get_base_url()}/search/"
 
         headers = self._get_headers() | {
-            'Content-Type': 'application/vnd.olrapi.jsonlogic+json'
+            "Content-Type": "application/vnd.olrapi.jsonlogic+json"
         }
 
         def call_fn():
-            response = requests.post(url, headers=headers, json=query, verify=self.verify_ssl, timeout=self.timeout)
+            response = requests.post(
+                url,
+                headers=headers,
+                json=query,
+                verify=self.verify_ssl,
+                timeout=self.timeout,
+            )
             response.raise_for_status()
             return response.json()
 
@@ -213,8 +252,10 @@ class Obsidian():
         def call_fn():
             headers = self._get_headers()
             if type == "metadata":
-                headers['Accept'] = 'application/vnd.olrapi.note+json'
-            response = requests.get(url, headers=headers, verify=self.verify_ssl, timeout=self.timeout)
+                headers["Accept"] = "application/vnd.olrapi.note+json"
+            response = requests.get(
+                url, headers=headers, verify=self.verify_ssl, timeout=self.timeout
+            )
             response.raise_for_status()
 
             if type == "metadata":
@@ -223,7 +264,9 @@ class Obsidian():
 
         return self._safe_call(call_fn)
 
-    def get_recent_periodic_notes(self, period: str, limit: int = 5, include_content: bool = False) -> list[dict[str, Any]]:
+    def get_recent_periodic_notes(
+        self, period: str, limit: int = 5, include_content: bool = False
+    ) -> list[dict[str, Any]]:
         """Get most recent periodic notes for the specified period type.
 
         Args:
@@ -235,10 +278,7 @@ class Obsidian():
             List of recent periodic notes
         """
         url = f"{self.get_base_url()}/periodic/{period}/recent"
-        params = {
-            "limit": limit,
-            "includeContent": include_content
-        }
+        params = {"limit": limit, "includeContent": include_content}
 
         def call_fn():
             response = requests.get(
@@ -246,7 +286,7 @@ class Obsidian():
                 headers=self._get_headers(),
                 params=params,
                 verify=self.verify_ssl,
-                timeout=self.timeout
+                timeout=self.timeout,
             )
             response.raise_for_status()
 
@@ -254,7 +294,9 @@ class Obsidian():
 
         return self._safe_call(call_fn)
 
-    def get_recent_changes(self, limit: int = 10, days: int = 90) -> list[dict[str, Any]]:
+    def get_recent_changes(
+        self, limit: int = 10, days: int = 90
+    ) -> list[dict[str, Any]]:
         """Get recently modified files in the vault.
 
         Args:
@@ -269,7 +311,7 @@ class Obsidian():
             "TABLE file.mtime",
             f"WHERE file.mtime >= date(today) - dur({days} days)",
             "SORT file.mtime DESC",
-            f"LIMIT {limit}"
+            f"LIMIT {limit}",
         ]
 
         # Join with proper DQL line breaks
@@ -278,16 +320,16 @@ class Obsidian():
         # Make the request to search endpoint
         url = f"{self.get_base_url()}/search/"
         headers = self._get_headers() | {
-            'Content-Type': 'application/vnd.olrapi.dataview.dql+txt'
+            "Content-Type": "application/vnd.olrapi.dataview.dql+txt"
         }
 
         def call_fn():
             response = requests.post(
                 url,
                 headers=headers,
-                data=dql_query.encode('utf-8'),
+                data=dql_query.encode("utf-8"),
                 verify=self.verify_ssl,
-                timeout=self.timeout
+                timeout=self.timeout,
             )
             response.raise_for_status()
             return response.json()
@@ -307,15 +349,19 @@ class Obsidian():
 
         def call_fn():
             headers = self._get_headers() | {
-                'Accept': 'application/vnd.olrapi.note+json'
+                "Accept": "application/vnd.olrapi.note+json"
             }
-            response = requests.get(url, headers=headers, verify=self.verify_ssl, timeout=self.timeout)
+            response = requests.get(
+                url, headers=headers, verify=self.verify_ssl, timeout=self.timeout
+            )
             response.raise_for_status()
             return response.json()
 
         return self._safe_call(call_fn)
 
-    def search_by_tags(self, tags: list[str], match_all: bool = False) -> list[dict[str, Any]]:
+    def search_by_tags(
+        self, tags: list[str], match_all: bool = False
+    ) -> list[dict[str, Any]]:
         """Search for files containing specified tags.
 
         Args:
@@ -331,15 +377,23 @@ class Obsidian():
 
         if match_all:
             # AND logic - all tags must be present
-            query = {"and": tag_conditions} if len(tag_conditions) > 1 else tag_conditions[0]
+            query = (
+                {"and": tag_conditions}
+                if len(tag_conditions) > 1
+                else tag_conditions[0]
+            )
         else:
             # OR logic - any tag matches
-            query = {"or": tag_conditions} if len(tag_conditions) > 1 else tag_conditions[0]
+            query = (
+                {"or": tag_conditions} if len(tag_conditions) > 1 else tag_conditions[0]
+            )
 
         # Use the existing search_json method
         return self.search_json(query)
 
-    def search_by_frontmatter(self, field: str, value: Any = None, operator: str = "equals") -> list[dict[str, Any]]:
+    def search_by_frontmatter(
+        self, field: str, value: Any = None, operator: str = "equals"
+    ) -> list[dict[str, Any]]:
         """Search files by frontmatter field values.
 
         Args:
@@ -353,9 +407,11 @@ class Obsidian():
         Raises:
             ValueError: If operator is invalid or value is missing when required
         """
-        valid_operators = ["equals", "contains", "exists"]
-        if operator not in valid_operators:
-            raise ValueError(f"Invalid operator: {operator}. Must be one of: {', '.join(valid_operators)}")
+        if operator not in constants.VALID_FRONTMATTER_OPERATORS:
+            raise ValueError(
+                f"Invalid operator: {operator}. "
+                f"Must be one of: {', '.join(constants.VALID_FRONTMATTER_OPERATORS)}"
+            )
 
         if operator != "exists" and value is None:
             raise ValueError(f"Value is required for operator '{operator}'")
@@ -373,6 +429,9 @@ class Obsidian():
                 query = {"in": [value, {"var": f"frontmatter.{field}"}]}
             else:
                 query = {"in": [value, {"var": f"frontmatter.{field}"}]}
+        else:
+            # This should never happen due to validation above, but helps type checker
+            raise ValueError(f"Unexpected operator: {operator}")
 
         # Use the existing search_json method
         return self.search_json(query)
@@ -387,7 +446,7 @@ class Obsidian():
         all_files = self.list_files_in_vault()
 
         # Filter to only markdown files
-        md_files = [f for f in all_files if f.endswith('.md') and not f.endswith('/')]
+        md_files = [f for f in all_files if f.endswith(".md") and not f.endswith("/")]
 
         # Aggregate tags from all files
         tag_counts: dict[str, int] = {}
@@ -395,7 +454,7 @@ class Obsidian():
         for filepath in md_files:
             try:
                 metadata = self.get_file_metadata(filepath)
-                file_tags = metadata.get('tags', [])
+                file_tags = metadata.get("tags", [])
 
                 for tag in file_tags:
                     tag_counts[tag] = tag_counts.get(tag, 0) + 1
@@ -433,9 +492,9 @@ class Obsidian():
 
                 # Process directories
                 for item in items:
-                    if item.endswith('/'):
+                    if item.endswith("/"):
                         # Remove trailing slash for comparison
-                        folder_name_only = item.rstrip('/')
+                        folder_name_only = item.rstrip("/")
 
                         # Build full path
                         if current_path == "":

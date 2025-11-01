@@ -73,7 +73,7 @@ async def test_simple_search_format(obsidian_client: Client[FastMCPTransport]):
             print(f"Number of results: {len(actual_results)}")
 
             if len(actual_results) > 0:
-                print(f"\nFirst result structure:")
+                print("\nFirst result structure:")
                 print(f"  Keys: {actual_results[0].keys()}")
                 print(f"  Filename: {actual_results[0].get('filename')}")
                 print(f"  Score: {actual_results[0].get('score')}")

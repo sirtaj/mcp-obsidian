@@ -1,9 +1,7 @@
 import requests
 from typing import Any
+from . import constants
 
-# Default configuration constants
-DEFAULT_OMNISEARCH_PORT = 51361
-DEFAULT_OMNISEARCH_PROTOCOL = "http"
 
 class OmnisearchClient:
     """Client for interacting with Obsidian Omnisearch plugin's HTTP API.
@@ -18,10 +16,10 @@ class OmnisearchClient:
 
     def __init__(
         self,
-        host: str = "127.0.0.1",
-        port: int = DEFAULT_OMNISEARCH_PORT,
-        protocol: str = DEFAULT_OMNISEARCH_PROTOCOL,
-        timeout: tuple[int, int] = (3, 6)
+        host: str = constants.DEFAULT_OMNISEARCH_HOST,
+        port: int = constants.DEFAULT_OMNISEARCH_PORT,
+        protocol: str = constants.DEFAULT_OMNISEARCH_PROTOCOL,
+        timeout: tuple[int, int] = constants.DEFAULT_TIMEOUT,
     ):
         """Initialize Omnisearch client.
 
@@ -38,7 +36,7 @@ class OmnisearchClient:
 
     def get_base_url(self) -> str:
         """Get base URL for Omnisearch API."""
-        return f'{self.protocol}://{self.host}:{self.port}'
+        return f"{self.protocol}://{self.host}:{self.port}"
 
     def _safe_call(self, f) -> Any:
         """Execute function with error handling.
@@ -56,8 +54,8 @@ class OmnisearchClient:
             return f()
         except requests.HTTPError as e:
             error_data = e.response.json() if e.response.content else {}
-            code = error_data.get('errorCode', -1)
-            message = error_data.get('message', '<unknown>')
+            code = error_data.get("errorCode", -1)
+            message = error_data.get("message", "<unknown>")
             raise Exception(f"Omnisearch Error {code}: {message}")
         except requests.exceptions.RequestException as e:
             raise Exception(f"Omnisearch request failed: {str(e)}")
@@ -78,7 +76,7 @@ class OmnisearchClient:
         url = f"{self.get_base_url()}/search"
 
         # URL-encode the query parameter
-        params = {'q': query}
+        params = {"q": query}
 
         def call_fn():
             # Note: Omnisearch HTTP API typically doesn't require authentication
@@ -86,7 +84,7 @@ class OmnisearchClient:
                 url,
                 params=params,
                 verify=False,  # Omnisearch may use self-signed certs
-                timeout=self.timeout
+                timeout=self.timeout,
             )
             response.raise_for_status()
             return response.json()

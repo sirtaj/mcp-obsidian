@@ -12,9 +12,6 @@ to clients when the Obsidian REST API is unavailable or misconfigured.
 """
 
 import pytest
-import os
-from fastmcp import FastMCP
-from mcp_obsidian.tools import mcp
 
 
 class TestConnectionErrors:
