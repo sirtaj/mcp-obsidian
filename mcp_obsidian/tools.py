@@ -500,7 +500,7 @@ if omnisearch_enabled:
         name=OMNISEARCH_TOOL_NAME,
         description="""Search vault using Omnisearch plugin's advanced search engine.
 
-        Omnisearch provides enhanced full-text search with:
+        FEATURES:
         - Fuzzy matching for typo-tolerant searches
         - BM25 relevance scoring (industry-standard ranking algorithm)
         - OCR support for searching text in images
@@ -508,12 +508,25 @@ if omnisearch_enabled:
         - Recency boosting for recently modified files
         - Intelligent tokenization
 
-        REQUIRES: Omnisearch plugin with HTTP server enabled in settings.
+        SEARCH SYNTAX & OPERATORS:
+        - path:"folder/path" - Restrict results to specific directory
+        - ext:"md pdf" or ext:md or .md - Filter by file type(s)
+        - "exact phrase" - Match precise multi-word expressions
+        - -excluded - Exclude notes containing specific words
 
-        This is more powerful than the basic obsidian_simple_search for:
-        - Finding content with typos or variations
-        - Ranking results by relevance
-        - Searching within PDFs and images (if OCR enabled)
+        QUERY TIPS:
+        - Best queries are spontaneous words that come to mind
+        - Use words from filenames, titles, or unique terminology
+        - Titles and headings are weighted more than body text
+        - Omnisearch handles typos automatically
+
+        EXAMPLES:
+        - meeting notes 2024 - Simple search
+        - path:"Work/Projects" deadline - Search in specific folder
+        - "machine learning" -basics - Exact phrase, exclude basics
+        - ext:pdf neural networks - Search only PDFs
+
+        REQUIRES: Omnisearch plugin with HTTP server enabled in settings.
 
         Returns detailed search results with relevance scores and context.""",
     )
