@@ -14,8 +14,8 @@ mcp = FastMCP(
     instructions=f"""
 Obsidian Vault Access via Local REST API
 
-TOOLS ({"20" if omnisearch_config.enabled else "19"} available):
-- File Operations: list, read, write, append, batch read, delete, move/rename
+TOOLS ({"21" if omnisearch_config.enabled else "20"} available):
+- File Operations: list, read, write, append, batch read, delete, move/rename, bulk move/rename
 - Search: simple text search, complex JsonLogic queries, search by tags/frontmatter, folder search{", Omnisearch advanced search (with fuzzy matching, BM25 scoring)" if omnisearch_config.enabled else ""}
 - Content Patching: insert content relative to headings/blocks/frontmatter
 - Periodic Notes: access daily/weekly/monthly notes (requires Periodic Notes plugin)
@@ -31,7 +31,7 @@ PATH CONVENTIONS:
 - Parent directories are created automatically when writing files
 
 IMPORTANT:
-- Delete operations require confirm=True parameter
+- Delete and move operations require confirm=True parameter
 - Use /content resource for text-only access (efficient)
 - Use /metadata resource when you need frontmatter, tags, or stats
 - Extract specific fields client-side: metadata['frontmatter'], metadata['tags'], metadata['stat']
@@ -69,13 +69,31 @@ def _get_omnisearch_client() -> omnisearch.OmnisearchClient:
 @mcp.tool(
     description="Lists all files and directories in the root directory of your Obsidian vault. Returns a structured object with separate lists for files and directories.",
 )
-def obsidian_list_files_in_vault() -> Annotated[
+def obsidian_list_files_in_vault(
+    max_depth: Annotated[
+        int,
+        Field(
+            description="Maximum recursion depth: 0=current directory only, 1=one level deep, -1=unlimited (default: 0)"
+        ),
+    ] = 0,
+    folders_only: Annotated[
+        bool,
+        Field(
+            description="If True, only return directories, not files (default: False)"
+        ),
+    ] = False,
+) -> Annotated[
     Dict[str, List[str]],
     Field(description="Object with 'files' and 'directories' arrays"),
 ]:
     api = _get_client()
-    raw_list = api.list_files_in_vault()
-    return utils.separate_files_and_directories(raw_list)
+    raw_list = api.list_files_in_vault(max_depth=max_depth)
+    result = utils.separate_files_and_directories(raw_list)
+
+    if folders_only:
+        result["files"] = []
+
+    return result
 
 
 @mcp.tool(
@@ -88,13 +106,30 @@ def obsidian_list_files_in_dir(
             description="Directory path relative to the vault root (trailing slashes are automatically handled)"
         ),
     ],
+    max_depth: Annotated[
+        int,
+        Field(
+            description="Maximum recursion depth: 0=current directory only, 1=one level deep, -1=unlimited (default: 0)"
+        ),
+    ] = 0,
+    folders_only: Annotated[
+        bool,
+        Field(
+            description="If True, only return directories, not files (default: False)"
+        ),
+    ] = False,
 ) -> Annotated[
     Dict[str, List[str]],
     Field(description="Object with 'files' and 'directories' arrays"),
 ]:
     api = _get_client()
-    raw_list = api.list_files_in_dir(dirpath)
-    return utils.separate_files_and_directories(raw_list)
+    raw_list = api.list_files_in_dir(dirpath, max_depth=max_depth)
+    result = utils.separate_files_and_directories(raw_list)
+
+    if folders_only:
+        result["files"] = []
+
+    return result
 
 
 @mcp.tool(
@@ -143,12 +178,67 @@ def obsidian_append_content(
 
 
 @mcp.tool(
+    description="""List all headings in a markdown file with their full hierarchical paths.
+
+    This tool helps you discover the correct heading paths to use with obsidian_patch_content.
+
+    Returns a list of headings with:
+    - level: Heading level (1-6)
+    - text: The heading text
+    - path: Full hierarchical path for use in patch operations (e.g., "Main::Tasks::Urgent")
+    - line: Line number where heading appears
+
+    IMPORTANT: Always use the 'path' value from this tool when calling obsidian_patch_content for nested headings.""",
+)
+def obsidian_list_headings(
+    filepath: Annotated[str, Field(description="File path relative to the vault root")],
+    delimiter: Annotated[
+        str,
+        Field(
+            description="Delimiter for building paths (default: '::'). Should match the delimiter you plan to use in patch operations."
+        ),
+    ] = "::",
+) -> Annotated[
+    list[dict[str, Any]],
+    Field(
+        description="List of heading dictionaries with level, text, path, and line number"
+    ),
+]:
+    api = _get_client()
+    return api.list_headings(filepath, delimiter)
+
+
+@mcp.tool(
     description="""Insert content into an existing note relative to a heading, block reference, or frontmatter field.
+
+    ⚠️  IMPORTANT FOR NESTED HEADINGS ⚠️
+    For headings at level 2 or deeper (##, ###, etc.), you MUST use the full hierarchical path from the root.
+    Use obsidian_list_headings FIRST to discover the correct paths.
+
+    STEP-BY-STEP GUIDE:
+    1. Top-level headings (# Heading):
+       ✅ Use just the heading text: target="Heading"
+
+    2. Nested headings (##, ###, etc.):
+       ✅ Use FULL path with :: delimiter: target="Parent::Child::Grandchild"
+       ❌ DO NOT use just the heading text: target="Grandchild" will fail!
+
+    3. Not sure? Call obsidian_list_headings first to see all valid paths.
+
+    EXAMPLES:
+    For this file structure:
+      # Meeting Notes
+      ## Action Items
+      ### Urgent
+
+    ❌ WRONG: target="Urgent" (will fail - heading is nested)
+    ❌ WRONG: target="Action Items::Urgent" (will fail - missing root)
+    ✅ CORRECT: target="Meeting Notes::Action Items::Urgent"
 
     Valid operations: 'append', 'prepend', 'replace'
     Valid target_types: 'heading', 'block', 'frontmatter'
 
-    Example: To append content after a heading named "Tasks", use operation='append', target_type='heading', target='Tasks'.""",
+    The trim_whitespace parameter (default: True) makes matching more forgiving by ignoring leading/trailing spaces.""",
 )
 def obsidian_patch_content(
     filepath: Annotated[str, Field(description="File path relative to the vault root")],
@@ -165,9 +255,21 @@ def obsidian_patch_content(
         ),
     ],
     content: Annotated[str, Field(description="The content to insert")],
+    trim_whitespace: Annotated[
+        bool,
+        Field(
+            description="Trim whitespace from target before matching (default: True for more forgiving matching)"
+        ),
+    ] = True,
+    delimiter: Annotated[
+        str,
+        Field(
+            description="Delimiter for nested headings (default: '::'). Change if headings contain '::' in their text."
+        ),
+    ] = "::",
 ) -> Annotated[None, Field(description="The content was successfully patched")]:
     api = _get_client()
-    api.patch_content(filepath, operation, target_type, target, content)
+    api.patch_content(filepath, operation, target_type, target, content, trim_whitespace, delimiter)
 
 
 @mcp.tool(
@@ -265,6 +367,130 @@ def obsidian_move_file(
         "message": f"Successfully moved '{source_path}' to '{destination_path}'",
         "source_path": source_path,
         "destination_path": destination_path,
+    }
+
+
+@mcp.tool(
+    description="""Move or rename multiple files in the vault in a single operation.
+
+    Processes each file move independently - if some files fail, others will still be processed.
+    Each file is moved using the same read → write → delete pattern as the single file move.
+
+    This is useful for:
+    - Moving multiple files to a new directory
+    - Batch renaming files
+    - Reorganizing vault structure
+
+    Returns detailed results for each file operation including successes and failures.""",
+)
+def obsidian_bulk_move_files(
+    moves: Annotated[
+        List[Dict[str, str]],
+        Field(
+            description="List of move operations, each with 'source' and 'destination' keys. "
+            "Example: [{'source': 'old/file1.md', 'destination': 'new/file1.md'}, "
+            "{'source': 'old/file2.md', 'destination': 'new/file2.md'}]"
+        ),
+    ],
+    confirm: Annotated[
+        bool,
+        Field(
+            description="Must be set to true to perform bulk move operations (this will delete source files)"
+        ),
+    ] = False,
+) -> Annotated[
+    Dict[str, Any],
+    Field(description="Results with success/failure details for each file"),
+]:
+    if not confirm:
+        raise RuntimeError(
+            "confirm must be set to true to move files in bulk (this will delete source files)"
+        )
+
+    if not moves:
+        raise ValueError("moves list cannot be empty")
+
+    # Validate all move operations have required keys
+    for i, move_op in enumerate(moves):
+        if not isinstance(move_op, dict):
+            raise ValueError(f"Move operation at index {i} must be a dictionary")
+        if "source" not in move_op:
+            raise ValueError(f"Move operation at index {i} missing 'source' key")
+        if "destination" not in move_op:
+            raise ValueError(f"Move operation at index {i} missing 'destination' key")
+
+    api = _get_client()
+    results = []
+    success_count = 0
+    failure_count = 0
+
+    for i, move_op in enumerate(moves):
+        source_path = move_op["source"]
+        destination_path = move_op["destination"]
+
+        try:
+            # Step 1: Read source file content
+            try:
+                content = api.get_file_contents(source_path)
+            except Exception as e:
+                raise RuntimeError(f"Failed to read source file: {str(e)}")
+
+            # Step 2: Write to destination
+            try:
+                api.put_content(destination_path, content)
+            except Exception as e:
+                raise RuntimeError(
+                    f"Failed to write to destination (source not deleted): {str(e)}"
+                )
+
+            # Step 3: Delete source file
+            try:
+                api.delete_file(source_path)
+            except Exception as e:
+                # Partial failure - file copied but not deleted
+                results.append(
+                    {
+                        "index": i,
+                        "source": source_path,
+                        "destination": destination_path,
+                        "success": False,
+                        "partial_success": True,
+                        "error": f"File copied to destination but failed to delete source: {str(e)}",
+                    }
+                )
+                failure_count += 1
+                continue
+
+            # Success
+            results.append(
+                {
+                    "index": i,
+                    "source": source_path,
+                    "destination": destination_path,
+                    "success": True,
+                }
+            )
+            success_count += 1
+
+        except Exception as e:
+            # Complete failure
+            results.append(
+                {
+                    "index": i,
+                    "source": source_path,
+                    "destination": destination_path,
+                    "success": False,
+                    "error": str(e),
+                }
+            )
+            failure_count += 1
+
+    return {
+        "total": len(moves),
+        "successful": success_count,
+        "failed": failure_count,
+        "success_rate": round(success_count / len(moves) * 100, 2),
+        "results": results,
     }
 
 

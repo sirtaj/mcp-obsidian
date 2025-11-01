@@ -45,7 +45,15 @@ class Obsidian:
         except requests.exceptions.RequestException as e:
             raise Exception(f"Request failed: {str(e)}")
 
-    def list_files_in_vault(self) -> list[str]:
+    def list_files_in_vault(self, max_depth: int = 0) -> list[str]:
+        """List files in the vault root directory.
+
+        Args:
+            max_depth: Maximum recursion depth (0 = current directory only, -1 = unlimited)
+
+        Returns:
+            List of file and directory paths (directories end with '/')
+        """
         url = f"{self.get_base_url()}/vault/"
 
         def call_fn():
@@ -59,9 +67,47 @@ class Obsidian:
 
             return response.json()["files"]
 
-        return self._safe_call(call_fn)
+        items = self._safe_call(call_fn)
 
-    def list_files_in_dir(self, dirpath: str) -> list[str]:
+        if max_depth == 0:
+            return items
+
+        # Recursive mode: traverse subdirectories up to max_depth
+        all_items = list(items)  # Copy the initial items
+        # Queue items: (directory_path, current_depth)
+        dirs_to_process = [(item.rstrip("/"), 1) for item in items if item.endswith("/")]
+
+        while dirs_to_process:
+            current_dir, current_depth = dirs_to_process.pop(0)
+
+            # Check if we've reached max depth (unless max_depth is -1 for unlimited)
+            if max_depth != -1 and current_depth > max_depth:
+                continue
+
+            try:
+                subitems = self.list_files_in_dir(current_dir, max_depth=0)
+                # Prepend directory path to each item
+                for item in subitems:
+                    full_path = f"{current_dir}/{item}"
+                    all_items.append(full_path)
+                    if item.endswith("/"):
+                        dirs_to_process.append((full_path.rstrip("/"), current_depth + 1))
+            except Exception:
+                # Skip directories that can't be accessed
+                continue
+
+        return all_items
+
+    def list_files_in_dir(self, dirpath: str, max_depth: int = 0) -> list[str]:
+        """List files in a specific directory.
+
+        Args:
+            dirpath: Path to the directory (relative to vault root)
+            max_depth: Maximum recursion depth (0 = current directory only, -1 = unlimited)
+
+        Returns:
+            List of file and directory paths (directories end with '/')
+        """
         # Strip trailing slash to avoid double slashes in URL
         dirpath = dirpath.rstrip("/")
         url = f"{self.get_base_url()}/vault/{dirpath}/"
@@ -77,7 +123,38 @@ class Obsidian:
 
             return response.json()["files"]
 
-        return self._safe_call(call_fn)
+        items = self._safe_call(call_fn)
+
+        if max_depth == 0:
+            return items
+
+        # Recursive mode: traverse subdirectories up to max_depth
+        all_items = list(items)  # Copy the initial items
+        # Queue items: (relative_subdir_path, current_depth)
+        dirs_to_process = [(item.rstrip("/"), 1) for item in items if item.endswith("/")]
+
+        while dirs_to_process:
+            current_subdir, current_depth = dirs_to_process.pop(0)
+
+            # Check if we've reached max depth (unless max_depth is -1 for unlimited)
+            if max_depth != -1 and current_depth > max_depth:
+                continue
+
+            try:
+                # Build full path from base directory
+                full_dir_path = f"{dirpath}/{current_subdir}"
+                subitems = self.list_files_in_dir(full_dir_path, max_depth=0)
+                # Prepend subdirectory path to each item
+                for item in subitems:
+                    relative_path = f"{current_subdir}/{item}"
+                    all_items.append(relative_path)
+                    if item.endswith("/"):
+                        dirs_to_process.append((relative_path.rstrip("/"), current_depth + 1))
+            except Exception:
+                # Skip directories that can't be accessed
+                continue
+
+        return all_items
 
     def get_file_contents(self, filepath: str) -> str:
         url = f"{self.get_base_url()}/vault/{filepath}"
@@ -118,6 +195,67 @@ class Obsidian:
 
         return "".join(result)
 
+    def list_headings(
+        self, filepath: str, delimiter: str = "::"
+    ) -> list[dict[str, Any]]:
+        """Extract all headings from a markdown file with their full hierarchical paths.
+
+        Args:
+            filepath: Path to the file (relative to vault root)
+            delimiter: Delimiter to use for building paths (default: "::")
+
+        Returns:
+            List of heading dictionaries with keys:
+            - level: Heading level (1-6)
+            - text: The heading text without # markers
+            - path: Full hierarchical path for use in patch operations
+            - line: Line number where heading appears (1-indexed)
+        """
+        content = self.get_file_contents(filepath)
+        headings = []
+        hierarchy_stack = []  # Stack to track current path at each level
+
+        for line_num, line in enumerate(content.split("\n"), start=1):
+            # Check if line is a heading (starts with one or more #)
+            stripped = line.lstrip()
+            if not stripped.startswith("#"):
+                continue
+
+            # Count heading level and extract text
+            level = 0
+            for char in stripped:
+                if char == "#":
+                    level += 1
+                else:
+                    break
+
+            if level == 0 or level > 6:
+                continue
+
+            # Extract heading text (after the # markers and any whitespace)
+            heading_text = stripped[level:].lstrip()
+
+            # Build the path by maintaining hierarchy
+            # Remove any levels deeper than current level
+            hierarchy_stack = hierarchy_stack[: level - 1]
+
+            # Add current heading to hierarchy
+            hierarchy_stack.append(heading_text)
+
+            # Build full path with delimiter
+            full_path = delimiter.join(hierarchy_stack)
+
+            headings.append(
+                {
+                    "level": level,
+                    "text": heading_text,
+                    "path": full_path,
+                    "line": line_num,
+                }
+            )
+
+        return headings
+
     def search(self, query: str, context_length: int = 100) -> list[dict[str, Any]]:
         url = f"{self.get_base_url()}/search/simple/"
         params = {"query": query, "contextLength": context_length}
@@ -152,7 +290,14 @@ class Obsidian:
         return self._safe_call(call_fn)
 
     def patch_content(
-        self, filepath: str, operation: str, target_type: str, target: str, content: str
+        self,
+        filepath: str,
+        operation: str,
+        target_type: str,
+        target: str,
+        content: str,
+        trim_whitespace: bool = True,
+        delimiter: str = "::",
     ) -> None:
         url = f"{self.get_base_url()}/vault/{filepath}"
 
@@ -161,6 +306,8 @@ class Obsidian:
             "Operation": operation,
             "Target-Type": target_type,
             "Target": urllib.parse.quote(target),
+            "Trim-Target-Whitespace": "true" if trim_whitespace else "false",
+            "Target-Delimiter": delimiter,
         }
 
         def call_fn():
