@@ -355,7 +355,7 @@ class Obsidian:
                 url,
                 headers=self._get_headers(),
                 verify=self.verify_ssl,
-                timeout=self.timeout,
+                timeout=constants.DELETE_TIMEOUT,  # Use longer timeout for deletes
             )
             response.raise_for_status()
             return None

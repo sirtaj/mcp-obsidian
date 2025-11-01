@@ -18,6 +18,10 @@ CONNECTION_TIMEOUT_SECONDS = 3
 READ_TIMEOUT_SECONDS = 6
 DEFAULT_TIMEOUT = (CONNECTION_TIMEOUT_SECONDS, READ_TIMEOUT_SECONDS)
 
+# Longer timeout for delete operations (which can be slow for large directories)
+DELETE_TIMEOUT_SECONDS = 30
+DELETE_TIMEOUT = (CONNECTION_TIMEOUT_SECONDS, DELETE_TIMEOUT_SECONDS)
+
 # SSL verification disabled for self-signed certificates
 OBSIDIAN_SSL_VERIFY = False
 
