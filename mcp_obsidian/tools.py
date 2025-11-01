@@ -507,6 +507,7 @@ if omnisearch_enabled:
         - PDF indexing and search
         - Recency boosting for recently modified files
         - Intelligent tokenization
+        - Automatic fallback to simple_search if Omnisearch unavailable
 
         SEARCH SYNTAX & OPERATORS:
         - path:"folder/path" - Restrict results to specific directory
@@ -526,7 +527,10 @@ if omnisearch_enabled:
         - "machine learning" -basics - Exact phrase, exclude basics
         - ext:pdf neural networks - Search only PDFs
 
-        REQUIRES: Omnisearch plugin with HTTP server enabled in settings.
+        NOTE: If Omnisearch HTTP server is unavailable, automatically falls back to
+        obsidian_simple_search. Results will include a '_fallback' field when fallback is used.
+
+        REQUIRES: Omnisearch plugin with HTTP server enabled in settings (optional).
 
         Returns detailed search results with relevance scores and context.""",
     )
@@ -536,5 +540,42 @@ if omnisearch_enabled:
         List[Dict[str, Any]],
         Field(description="List of search results with relevance scoring from Omnisearch")
     ]:
+        """Search using Omnisearch plugin with automatic fallback to simple search.
+
+        If Omnisearch is unavailable, automatically falls back to obsidian_simple_search.
+        """
         client = _get_omnisearch_client()
-        return client.search(query)
+
+        try:
+            return client.search(query)
+        except Exception as e:
+            # If Omnisearch is unavailable, fall back to regular Obsidian simple search
+            error_msg = str(e)
+            if "Connection refused" in error_msg or "request failed" in error_msg.lower():
+                # Fall back to regular Obsidian simple search
+                api = _get_client()
+                results = api.search(query, context_length=100)
+
+                # Format results to match expected structure and add fallback notice
+                formatted_results = []
+                for result in results:
+                    formatted_matches = []
+                    for match in result.get('matches', []):
+                        context = match.get('context', '')
+                        match_pos = match.get('match', {})
+                        start = match_pos.get('start', 0)
+                        end = match_pos.get('end', 0)
+                        formatted_matches.append({
+                            'context': context,
+                            'match_position': {'start': start, 'end': end}
+                        })
+                    formatted_results.append({
+                        'filename': result.get('filename', ''),
+                        'score': result.get('score', 0),
+                        'matches': formatted_matches,
+                        '_fallback': 'Used Obsidian simple_search (Omnisearch unavailable)'
+                    })
+                return formatted_results
+            else:
+                # Re-raise if it's not a connection error
+                raise

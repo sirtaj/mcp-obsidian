@@ -17,25 +17,27 @@ This is a modernized fork that migrated from the legacy `mcp` library to `fastmc
 ### Three-Layer Architecture
 
 ```
-┌─────────────────────────────────────────┐
-│  CLI Layer (server.py)                  │
-│  - Argument parsing                     │
-│  - Transport mode selection             │
-└──────────────┬──────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│  CLI Layer (server.py)                                      │
+│  - Argument parsing                                         │
+│  - Transport mode selection                                 │
+└──────────────┬──────────────────────────────────────────────┘
                │
-┌──────────────▼──────────────────────────┐
-│  Tools Layer (tools.py)                 │
-│  - FastMCP server initialization        │
-│  - 14 tool registrations                │
-│  - Environment config loading           │
-└──────────────┬──────────────────────────┘
+┌──────────────▼──────────────────────────────────────────────┐
+│  Tools Layer (tools.py)                                     │
+│  - FastMCP server initialization                            │
+│  - 18-19 tool registrations (conditional)                   │
+│  - Environment config loading                               │
+└──────────────┬──────────────────────────────────────────────┘
                │
-┌──────────────▼──────────────────────────┐
-│  API Client Layer (obsidian.py)         │
-│  - HTTP communication                   │
-│  - Error handling                       │
-│  - 11 REST API methods                  │
-└─────────────────────────────────────────┘
+        ┌──────┴───────┐
+        │              │
+┌───────▼─────┐  ┌─────▼──────────────┐
+│ obsidian.py │  │ omnisearch.py      │
+│             │  │ (optional)         │
+│ - REST API  │  │ - HTTP search API  │
+│ - 11 methods│  │ - 1 method         │
+└─────────────┘  └────────────────────┘
 ```
 
 ### Core Files
@@ -43,12 +45,13 @@ This is a modernized fork that migrated from the legacy `mcp` library to `fastmc
 | File | Purpose | Lines | Key Responsibilities |
 |------|---------|-------|---------------------|
 | `mcp_obsidian/server.py` | Entry point | ~50 | CLI argument parsing, transport mode handling |
-| `mcp_obsidian/tools.py` | Tool registry | ~400 | All 14 MCP tool definitions, FastMCP server config |
-| `mcp_obsidian/obsidian.py` | API client | ~200 | HTTP communication with Obsidian Local REST API |
+| `mcp_obsidian/tools.py` | Tool registry | ~520 | All 18-19 MCP tool definitions, FastMCP server config |
+| `mcp_obsidian/obsidian.py` | Obsidian API client | ~450 | HTTP communication with Obsidian Local REST API |
+| `mcp_obsidian/omnisearch.py` | Omnisearch client | ~100 | HTTP communication with Omnisearch plugin (optional) |
 
 ### Tool Categories
 
-The server provides 14 tools organized into 5 categories:
+The server provides 18 tools by default (19 with optional Omnisearch) organized into 6 categories:
 
 1. **File Operations** (6 tools)
    - List vault/directory contents
@@ -61,9 +64,13 @@ The server provides 14 tools organized into 5 categories:
 3. **File Deletion** (1 tool)
    - Delete files/directories (with safety confirmation)
 
-4. **Search Operations** (2 tools)
+4. **Search Operations** (6-7 tools)
    - Simple text search
    - Complex JsonLogic queries
+   - Search by tags/frontmatter
+   - Folder search
+   - List all tags
+   - **Omnisearch integration (optional)**: Advanced fuzzy search with BM25 scoring
 
 5. **Periodic Notes** (2 tools) + Recent Changes (1 tool)
    - Get current/recent periodic notes
@@ -121,6 +128,68 @@ host = os.getenv("OBSIDIAN_HOST", "127.0.0.1")  # Optional with default
 
 No config files needed beyond `.env`.
 
+### 5. Optional Feature Pattern: Omnisearch Integration
+
+The Omnisearch integration demonstrates the pattern for optional features with separate client modules:
+
+```python
+# In tools.py:
+from . import obsidian, omnisearch  # Separate client modules
+
+# Environment-based feature flag
+omnisearch_enabled = os.getenv("OMNISEARCH_ENABLED", "false").lower() == "true"
+
+def _get_omnisearch_client() -> omnisearch.OmnisearchClient:
+    """Separate client factory for optional feature."""
+    return omnisearch.OmnisearchClient(
+        host=omnisearch_host,
+        port=omnisearch_port,
+        protocol=omnisearch_protocol
+    )
+
+# Conditional tool registration
+if omnisearch_enabled:
+    @mcp.tool(name=OMNISEARCH_TOOL_NAME)
+    def obsidian_omnisearch_search(query: str) -> list[dict]:
+        client = _get_omnisearch_client()
+
+        try:
+            return client.search(query)
+        except Exception as e:
+            # Automatic fallback to obsidian_simple_search if Omnisearch unavailable
+            if "Connection refused" in str(e) or "request failed" in str(e).lower():
+                api = _get_client()
+                results = api.search(query, context_length=100)
+                # Add fallback indicator to results
+                for result in results:
+                    result['_fallback'] = 'Used Obsidian simple_search (Omnisearch unavailable)'
+                return results
+            else:
+                raise
+```
+
+**Key aspects:**
+- **Separate module**: `omnisearch.py` keeps Omnisearch code isolated from `obsidian.py`
+- **Multi-level graceful degradation**:
+  1. Server starts successfully even if `OMNISEARCH_ENABLED=false`
+  2. Tool automatically falls back to `obsidian_simple_search` if Omnisearch unreachable
+- Tool only registered when enabled via environment variable
+- Dedicated client factory function `_get_omnisearch_client()`
+- **Independent host configuration**: `OMNISEARCH_HOST` can differ from `OBSIDIAN_HOST`
+
+**Configuration:**
+```bash
+OMNISEARCH_ENABLED=true        # Enable feature
+OMNISEARCH_HOST=127.0.0.1      # Can be different from OBSIDIAN_HOST
+OMNISEARCH_PORT=51361          # Default port
+OMNISEARCH_PROTOCOL=http       # Typically HTTP
+```
+
+**When to use this pattern:**
+- Optional plugin integrations (like Omnisearch, Periodic Notes, Dataview)
+- Features requiring external services
+- Experimental/beta features
+
 ## Common Maintenance Tasks
 
 ### Adding a New Tool
@@ -144,6 +213,67 @@ No config files needed beyond `.env`.
 3. **Update README.md** with usage examples
 
 4. **Test with Claude Desktop** or `mcp dev`
+
+### Adding a New Optional Client Module
+
+Follow the Omnisearch pattern for plugin integrations or external services:
+
+1. **Create new client module** (e.g., `newplugin.py`):
+   ```python
+   import requests
+   from typing import Any
+
+   DEFAULT_PLUGIN_PORT = 12345
+
+   class PluginClient:
+       def __init__(self, host: str, port: int, protocol: str = "http"):
+           self.host = host
+           self.port = port
+           self.protocol = protocol
+
+       def _safe_call(self, f) -> Any:
+           # Standard error handling pattern
+           ...
+
+       def search(self, query: str) -> list[dict]:
+           # API implementation
+           ...
+   ```
+
+2. **Add environment variables in `tools.py`:**
+   ```python
+   from . import obsidian, omnisearch, newplugin
+
+   plugin_enabled = os.getenv("PLUGIN_ENABLED", "false").lower() == "true"
+   plugin_host = os.getenv("PLUGIN_HOST", obsidian_host)
+   plugin_port = int(os.getenv("PLUGIN_PORT", str(newplugin.DEFAULT_PLUGIN_PORT)))
+   ```
+
+3. **Create client factory function:**
+   ```python
+   def _get_plugin_client() -> newplugin.PluginClient:
+       return newplugin.PluginClient(
+           host=plugin_host,
+           port=plugin_port
+       )
+   ```
+
+4. **Conditionally register tool:**
+   ```python
+   if plugin_enabled:
+       @mcp.tool(name="obsidian_plugin_search")
+       def obsidian_plugin_search(query: str) -> list[dict]:
+           client = _get_plugin_client()
+           return client.search(query)
+   ```
+
+5. **Update documentation** (README.md, AGENTS.md, .env.example)
+
+**Why separate modules:**
+- Clear separation of concerns
+- Easier to maintain and test
+- Optional features don't bloat core client
+- Independent error handling and dependencies
 
 ### Updating Dependencies
 
@@ -333,6 +463,34 @@ dependencies = ["fastmcp>=2.11.2", ...]
 dependencies = ["mcp", ...]  # Old library
 ```
 
+### 7. Omnisearch Troubleshooting (Optional Feature)
+
+If Omnisearch tool isn't available when expected:
+
+**Check 1: Environment variable**
+```bash
+OMNISEARCH_ENABLED=true  # Must be lowercase "true"
+```
+
+**Check 2: HTTP server enabled in Omnisearch plugin**
+- Obsidian > Settings > Omnisearch > Enable "HTTP Server"
+- Verify port matches `OMNISEARCH_PORT` (default: 51361)
+
+**Check 3: Server logs**
+If enabled but connection fails, server will start successfully but tool won't be registered.
+No error is raised - this is intentional graceful degradation.
+
+**Check 4: Protocol**
+Omnisearch typically uses HTTP, not HTTPS:
+```bash
+OMNISEARCH_PROTOCOL=http  # Usually HTTP, not HTTPS
+```
+
+**Expected behavior:**
+- `OMNISEARCH_ENABLED=false`: Tool not registered (default)
+- `OMNISEARCH_ENABLED=true` + working connection: Tool available
+- `OMNISEARCH_ENABLED=true` + connection fails: Server starts, tool not registered
+
 ## API Reference
 
 ### Obsidian REST API Plugin Endpoints
@@ -355,6 +513,18 @@ The `obsidian.py` client wraps these endpoints:
 
 Full API spec available in `openapi.yaml`.
 
+### Omnisearch Plugin HTTP API (Optional)
+
+When enabled, the client also connects to Omnisearch's HTTP server:
+
+| Method | Endpoint | Purpose | Tool |
+|--------|----------|---------|------|
+| GET | `/search?q={query}` | Advanced fuzzy search | `obsidian_omnisearch_search` |
+
+**Base URL:** `http://{OMNISEARCH_HOST}:{OMNISEARCH_PORT}` (typically `http://127.0.0.1:51361`)
+
+**Note:** Omnisearch API does not require authentication headers.
+
 ### Environment Variables
 
 | Variable | Required | Default | Purpose |
@@ -363,6 +533,10 @@ Full API spec available in `openapi.yaml`.
 | `OBSIDIAN_HOST` | No | `127.0.0.1` | Obsidian server host |
 | `OBSIDIAN_PORT` | No | `27124` | Obsidian server port |
 | `OBSIDIAN_PROTOCOL` | No | `https` | HTTP or HTTPS |
+| `OMNISEARCH_ENABLED` | No | `false` | Enable Omnisearch integration |
+| `OMNISEARCH_HOST` | No | Same as `OBSIDIAN_HOST` | Omnisearch server host |
+| `OMNISEARCH_PORT` | No | `51361` | Omnisearch server port |
+| `OMNISEARCH_PROTOCOL` | No | `http` | HTTP or HTTPS (typically HTTP) |
 
 ## Code Quality Guidelines
 
@@ -472,14 +646,16 @@ Currently, the server connects to one vault per instance. To support multiple:
 ├── mcp_obsidian/
 │   ├── __init__.py           # Empty package marker
 │   ├── server.py             # CLI entry point (~50 lines)
-│   ├── tools.py              # 14 MCP tools (~400 lines)
-│   └── obsidian.py           # REST API client (~200 lines)
+│   ├── tools.py              # 18-19 MCP tools (~520 lines)
+│   ├── obsidian.py           # Obsidian REST API client (~450 lines)
+│   └── omnisearch.py         # Omnisearch HTTP client (~100 lines, optional)
 ├── pyproject.toml            # Project metadata, dependencies
 ├── uv.lock                   # Locked dependencies
 ├── openapi.yaml              # Obsidian API specification
 ├── README.md                 # User documentation
 ├── LICENSE                   # MIT License
 ├── .gitignore                # Python ignore patterns
+├── .env.example              # Environment variable template
 └── AGENTS.md                 # This file
 ```
 
