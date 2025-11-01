@@ -293,3 +293,114 @@ class Obsidian():
             return response.json()
 
         return self._safe_call(call_fn)
+
+    def get_file_metadata(self, filepath: str) -> dict[str, Any]:
+        """Get complete file metadata including frontmatter, tags, and stats.
+
+        Args:
+            filepath: Path to the file (relative to vault root)
+
+        Returns:
+            Dictionary with keys: content, frontmatter, path, tags, stat
+        """
+        url = f"{self.get_base_url()}/vault/{filepath}"
+
+        def call_fn():
+            headers = self._get_headers() | {
+                'Accept': 'application/vnd.olrapi.note+json'
+            }
+            response = requests.get(url, headers=headers, verify=self.verify_ssl, timeout=self.timeout)
+            response.raise_for_status()
+            return response.json()
+
+        return self._safe_call(call_fn)
+
+    def search_by_tags(self, tags: list[str], match_all: bool = False) -> list[dict[str, Any]]:
+        """Search for files containing specified tags.
+
+        Args:
+            tags: List of tags to search for (without # prefix)
+            match_all: If True, files must have ALL tags (AND logic).
+                      If False, files with ANY tag matches (OR logic).
+
+        Returns:
+            List of files matching the tag criteria
+        """
+        # Build JsonLogic query for tag search
+        tag_conditions = [{"in": [tag, {"var": "tags"}]} for tag in tags]
+
+        if match_all:
+            # AND logic - all tags must be present
+            query = {"and": tag_conditions} if len(tag_conditions) > 1 else tag_conditions[0]
+        else:
+            # OR logic - any tag matches
+            query = {"or": tag_conditions} if len(tag_conditions) > 1 else tag_conditions[0]
+
+        # Use the existing search_json method
+        return self.search_json(query)
+
+    def search_by_frontmatter(self, field: str, value: Any = None, operator: str = "equals") -> list[dict[str, Any]]:
+        """Search files by frontmatter field values.
+
+        Args:
+            field: Frontmatter field name to search
+            value: Value to match (optional if operator is "exists")
+            operator: Comparison operator ("equals", "contains", "exists")
+
+        Returns:
+            List of files where frontmatter matches criteria
+
+        Raises:
+            ValueError: If operator is invalid or value is missing when required
+        """
+        valid_operators = ["equals", "contains", "exists"]
+        if operator not in valid_operators:
+            raise ValueError(f"Invalid operator: {operator}. Must be one of: {', '.join(valid_operators)}")
+
+        if operator != "exists" and value is None:
+            raise ValueError(f"Value is required for operator '{operator}'")
+
+        # Build JsonLogic query for frontmatter search
+        if operator == "exists":
+            # Check if field exists in frontmatter
+            query = {"in": [field, {"var": "frontmatter"}]}
+        elif operator == "equals":
+            # Check if field equals specific value
+            query = {"==": [{"var": f"frontmatter.{field}"}, value]}
+        elif operator == "contains":
+            # Check if field contains substring (for strings) or value (for arrays)
+            if isinstance(value, str):
+                query = {"in": [value, {"var": f"frontmatter.{field}"}]}
+            else:
+                query = {"in": [value, {"var": f"frontmatter.{field}"}]}
+
+        # Use the existing search_json method
+        return self.search_json(query)
+
+    def list_all_tags(self) -> dict[str, int]:
+        """Get all unique tags in the vault with usage counts.
+
+        Returns:
+            Dictionary mapping tag names to number of files using them
+        """
+        # Get all files in vault
+        all_files = self.list_files_in_vault()
+
+        # Filter to only markdown files
+        md_files = [f for f in all_files if f.endswith('.md') and not f.endswith('/')]
+
+        # Aggregate tags from all files
+        tag_counts: dict[str, int] = {}
+
+        for filepath in md_files:
+            try:
+                metadata = self.get_file_metadata(filepath)
+                file_tags = metadata.get('tags', [])
+
+                for tag in file_tags:
+                    tag_counts[tag] = tag_counts.get(tag, 0) + 1
+            except Exception:
+                # Skip files that can't be read or parsed
+                continue
+
+        return tag_counts

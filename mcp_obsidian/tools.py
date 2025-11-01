@@ -324,3 +324,133 @@ def obsidian_get_recent_changes(
 
     api = _get_client()
     return api.get_recent_changes(limit, days)
+
+# ==============================================================================
+# MCP Resources (Read-Only Metadata Access)
+# ==============================================================================
+
+@mcp.resource("obsidian://vault/{filepath}/metadata")
+def get_file_metadata_resource(filepath: Annotated[str, Field(description="File path relative to vault root")]) -> Annotated[
+    Dict[str, Any],
+    Field(description="Complete file metadata including content, frontmatter, tags, and stats")
+]:
+    """Get complete metadata for a file: content, frontmatter, tags, and file statistics.
+
+    This resource provides read-only access to all metadata associated with a file,
+    including YAML frontmatter, extracted tags, and filesystem statistics.
+    """
+    api = _get_client()
+    return api.get_file_metadata(filepath)
+
+@mcp.resource("obsidian://vault/{filepath}/frontmatter")
+def get_file_frontmatter(filepath: Annotated[str, Field(description="File path relative to vault root")]) -> Annotated[
+    Dict[str, Any],
+    Field(description="YAML frontmatter fields as a dictionary")
+]:
+    """Get only the YAML frontmatter from a file.
+
+    Returns an empty dictionary if the file has no frontmatter.
+    """
+    api = _get_client()
+    metadata = api.get_file_metadata(filepath)
+    return metadata.get('frontmatter', {})
+
+@mcp.resource("obsidian://vault/{filepath}/tags")
+def get_file_tags(filepath: Annotated[str, Field(description="File path relative to vault root")]) -> Annotated[
+    List[str],
+    Field(description="Array of tags found in the file")
+]:
+    """Get all tags from a file.
+
+    Returns an empty array if the file has no tags.
+    """
+    api = _get_client()
+    metadata = api.get_file_metadata(filepath)
+    return metadata.get('tags', [])
+
+@mcp.resource("obsidian://vault/{filepath}/stats")
+def get_file_stats(filepath: Annotated[str, Field(description="File path relative to vault root")]) -> Annotated[
+    Dict[str, Any],
+    Field(description="File statistics with ctime, mtime, and size")
+]:
+    """Get file statistics (creation time, modification time, size).
+
+    Returns:
+        Dictionary with:
+        - ctime: Creation time (timestamp)
+        - mtime: Modification time (timestamp)
+        - size: File size in bytes
+    """
+    api = _get_client()
+    metadata = api.get_file_metadata(filepath)
+    return metadata.get('stat', {})
+
+# ==============================================================================
+# Search Tools (Tag and Frontmatter Queries)
+# ==============================================================================
+
+@mcp.tool(
+    name="obsidian_search_by_tags",
+    description="""Search for files containing specified tags.
+
+    Use this tool to find all files that have specific tags. Supports both AND and OR logic:
+    - AND logic (match_all=True): Files must have ALL specified tags
+    - OR logic (match_all=False): Files with ANY of the specified tags will match
+
+    Tags should be provided without the # prefix.""",
+)
+def obsidian_search_by_tags(
+    tags: Annotated[List[str], Field(description="List of tags to search for (without # prefix)")],
+    match_all: Annotated[bool, Field(description="If True, files must have ALL tags (AND). If False, files with ANY tag match (OR).")] = False
+) -> Annotated[
+    List[Dict[str, Any]],
+    Field(description="List of files matching the tag criteria")
+]:
+    api = _get_client()
+    return api.search_by_tags(tags, match_all)
+
+@mcp.tool(
+    name="obsidian_search_by_frontmatter",
+    description="""Search files by frontmatter field values.
+
+    This tool allows you to search for files based on their YAML frontmatter fields.
+
+    Operators:
+    - "equals": Find files where field exactly matches the value
+    - "contains": Find files where field contains the value (works for strings and arrays)
+    - "exists": Find files that have the specified field (value parameter not needed)
+
+    Example uses:
+    - Find files with status="done": field="status", value="done", operator="equals"
+    - Find files with any status field: field="status", operator="exists"
+    - Find files tagged with "project": field="tags", value="project", operator="contains"
+    """,
+)
+def obsidian_search_by_frontmatter(
+    field: Annotated[str, Field(description="Frontmatter field name to search")],
+    value: Annotated[Any, Field(description="Value to match (optional if operator is 'exists')")] = None,
+    operator: Annotated[str, Field(description="Comparison operator: 'equals', 'contains', or 'exists'")] = "equals"
+) -> Annotated[
+    List[Dict[str, Any]],
+    Field(description="List of files where frontmatter matches the criteria")
+]:
+    api = _get_client()
+    return api.search_by_frontmatter(field, value, operator)
+
+@mcp.tool(
+    name="obsidian_list_all_tags",
+    description="""Get all unique tags in the vault with usage counts.
+
+    Returns a dictionary mapping each tag to the number of files using it.
+    This is useful for getting an overview of all tags in your vault and
+    understanding tag popularity.
+
+    Note: This operation scans all markdown files in the vault and may take
+    some time for large vaults.""",
+)
+def obsidian_list_all_tags() -> Annotated[
+    Dict[str, int],
+    Field(description="Dictionary mapping tag names to the number of files using them")
+]:
+    api = _get_client()
+    return api.list_all_tags()
