@@ -379,6 +379,129 @@ class TestFileMoveWorkflows:
             assert result.data == expected_content
 
 
+class TestFolderSearch:
+    """Tests for folder search functionality."""
+
+    async def test_search_folders_case_insensitive(self, obsidian_client: Client[FastMCPTransport]):
+        """Test case-insensitive folder search."""
+        # Create test folder structure with actual content files
+        test_files = [
+            ("test-folders/search-test/Project/note1.md", "# Project Note"),
+            ("test-folders/search-test/MyProject/note2.md", "# My Project Note"),
+            ("test-folders/search-test/project-2024/note3.md", "# 2024 Project"),
+            ("test-folders/search-test/Documents/doc1.md", "# Document"),
+        ]
+
+        for filepath, content in test_files:
+            await obsidian_client.call_tool(
+                name="obsidian_put_content",
+                arguments={"filepath": filepath, "content": content}
+            )
+
+        try:
+            # Search for "project" (case-insensitive) from within test-folders
+            result = await obsidian_client.call_tool(
+                name="obsidian_search_folders",
+                arguments={"folder_name": "project", "root_path": "test-folders"}
+            )
+
+            assert result.data is not None
+            assert isinstance(result.data, list)
+
+            # Should find folders containing "project" (case-insensitive)
+            matching = [f for f in result.data if "project" in f.lower()]
+            assert len(matching) >= 3, f"Expected >= 3 folders with 'project', found {len(matching)}: {matching}"
+
+        finally:
+            # Cleanup
+            try:
+                await obsidian_client.call_tool(
+                    name="obsidian_delete_file",
+                    arguments={"filepath": "test-folders/search-test", "confirm": True}
+                )
+            except Exception:
+                pass
+
+    async def test_search_folders_with_root_path(self, obsidian_client: Client[FastMCPTransport]):
+        """Test folder search from a specific root path."""
+        # Create nested folder structure with actual content
+        test_files = [
+            ("test-folders/root-search/Archives/archive-2023/file.md", "# 2023"),
+            ("test-folders/root-search/Archives/archive-2024/file.md", "# 2024"),
+            ("test-folders/root-search/Projects/archive-old/file.md", "# Old"),
+        ]
+
+        for filepath, content in test_files:
+            await obsidian_client.call_tool(
+                name="obsidian_put_content",
+                arguments={"filepath": filepath, "content": content}
+            )
+
+        try:
+            # Search for "archive" only in Archives folder
+            result = await obsidian_client.call_tool(
+                name="obsidian_search_folders",
+                arguments={"folder_name": "archive", "root_path": "test-folders/root-search/Archives"}
+            )
+
+            assert result.data is not None
+            assert isinstance(result.data, list)
+
+            # Should only find archives under Archives folder
+            for folder_path in result.data:
+                if "archive" in folder_path.lower():
+                    assert "Archives" in folder_path
+
+        finally:
+            # Cleanup
+            try:
+                await obsidian_client.call_tool(
+                    name="obsidian_delete_file",
+                    arguments={"filepath": "test-folders/root-search", "confirm": True}
+                )
+            except Exception:
+                pass
+
+    async def test_search_folders_substring_match(self, obsidian_client: Client[FastMCPTransport]):
+        """Test that folder search matches substrings."""
+        # Create folders with year in name and actual content
+        test_files = [
+            ("test-folders/year-search/Notes-2024/note.md", "# 2024 Notes"),
+            ("test-folders/year-search/Archive-2024-Q1/archive.md", "# Q1 Archive"),
+            ("test-folders/year-search/Projects-2023/project.md", "# 2023 Projects"),
+        ]
+
+        for filepath, content in test_files:
+            await obsidian_client.call_tool(
+                name="obsidian_put_content",
+                arguments={"filepath": filepath, "content": content}
+            )
+
+        try:
+            # Search for "2024" substring from within test-folders/year-search
+            result = await obsidian_client.call_tool(
+                name="obsidian_search_folders",
+                arguments={"folder_name": "2024", "root_path": "test-folders/year-search"}
+            )
+
+            assert result.data is not None
+            assert isinstance(result.data, list)
+
+            # Should find folders containing "2024"
+            matching = [f for f in result.data if "2024" in f]
+            assert len(matching) >= 2, f"Expected >= 2 folders with '2024', found {len(matching)}: {matching}"
+
+        finally:
+            # Cleanup
+            try:
+                await obsidian_client.call_tool(
+                    name="obsidian_delete_file",
+                    arguments={"filepath": "test-folders/year-search", "confirm": True}
+                )
+            except Exception:
+                pass
+
+
 class TestCleanup:
     """Cleanup tests - run last to remove test folders."""
 

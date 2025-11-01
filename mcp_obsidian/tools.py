@@ -454,3 +454,25 @@ def obsidian_list_all_tags() -> Annotated[
 ]:
     api = _get_client()
     return api.list_all_tags()
+
+@mcp.tool(
+    name="obsidian_search_folders",
+    description="""Recursively search for folders by name using case-insensitive substring matching.
+
+    This tool searches through the entire vault folder hierarchy (or from a specified root)
+    and returns all folders whose names contain the search term (case-insensitive).
+
+    Examples:
+    - Search for "project" to find folders like "Projects", "my-project", "PROJECT-2024"
+    - Search for "archive" in "Notes" folder to find all archive folders under Notes
+    - Search for "2024" to find all folders with year 2024 in their name""",
+)
+def obsidian_search_folders(
+    folder_name: Annotated[str, Field(description="Substring to search for in folder names (case-insensitive)")],
+    root_path: Annotated[str, Field(description="Optional root directory to start search from (defaults to vault root)")] = ""
+) -> Annotated[
+    List[str],
+    Field(description="List of folder paths that match the search criteria")
+]:
+    api = _get_client()
+    return api.search_folders(folder_name, root_path)

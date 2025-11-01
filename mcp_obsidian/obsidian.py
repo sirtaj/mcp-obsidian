@@ -404,3 +404,54 @@ class Obsidian():
                 continue
 
         return tag_counts
+
+    def search_folders(self, folder_name: str, root_path: str = "") -> list[str]:
+        """Recursively search for folders by name (case-insensitive substring match).
+
+        Args:
+            folder_name: Substring to search for in folder names (case-insensitive)
+            root_path: Optional root directory to start search from (defaults to vault root)
+
+        Returns:
+            List of folder paths that match the search criteria
+        """
+        matching_folders = []
+        folders_to_process = [root_path]
+
+        # Normalize search term to lowercase for case-insensitive comparison
+        search_term = folder_name.lower()
+
+        while folders_to_process:
+            current_path = folders_to_process.pop(0)
+
+            try:
+                # Get all items in current directory
+                if current_path == "":
+                    items = self.list_files_in_vault()
+                else:
+                    items = self.list_files_in_dir(current_path)
+
+                # Process directories
+                for item in items:
+                    if item.endswith('/'):
+                        # Remove trailing slash for comparison
+                        folder_name_only = item.rstrip('/')
+
+                        # Build full path
+                        if current_path == "":
+                            full_path = folder_name_only
+                        else:
+                            full_path = f"{current_path}/{folder_name_only}"
+
+                        # Check if folder name matches (case-insensitive substring)
+                        if search_term in folder_name_only.lower():
+                            matching_folders.append(full_path)
+
+                        # Add to queue for recursive search
+                        folders_to_process.append(full_path)
+
+            except Exception:
+                # Skip folders that can't be accessed
+                continue
+
+        return matching_folders
