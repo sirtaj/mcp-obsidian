@@ -73,8 +73,8 @@ class TestMetadataResources:
         assert 'mtime' in stat
         assert 'size' in stat
 
-    async def test_get_file_frontmatter_resource(self, obsidian_client: Client[FastMCPTransport], vault_files: list[str]):
-        """Test getting only frontmatter via resource."""
+    async def test_get_file_content_resource(self, obsidian_client: Client[FastMCPTransport], vault_files: list[str]):
+        """Test getting only file content via resource."""
         md_files = [f for f in vault_files if f.endswith('.md')]
 
         if not md_files:
@@ -82,54 +82,21 @@ class TestMetadataResources:
 
         test_file = md_files[0]
 
+        # Access the resource
         result = await obsidian_client.read_resource(
-            uri=f"obsidian://vault/{test_file}/frontmatter"
+            uri=f"obsidian://vault/{test_file}/content"
         )
 
-        frontmatter = parse_resource_data(result)
-        assert frontmatter is not None
-        assert isinstance(frontmatter, dict)
-        # Frontmatter may be empty, that's okay
+        # Content resource returns plain text directly (not JSON)
+        assert isinstance(result, list) and len(result) > 0
+        content_data = result[0]
+        assert hasattr(content_data, 'text')
+        content = content_data.text
 
-    async def test_get_file_tags_resource(self, obsidian_client: Client[FastMCPTransport], vault_files: list[str]):
-        """Test getting tags via resource."""
-        md_files = [f for f in vault_files if f.endswith('.md')]
-
-        if not md_files:
-            pytest.skip("No markdown files found")
-
-        test_file = md_files[0]
-
-        result = await obsidian_client.read_resource(
-            uri=f"obsidian://vault/{test_file}/tags"
-        )
-
-        tags = parse_resource_data(result)
-        assert tags is not None
-        assert isinstance(tags, list)
-        # All items should be strings
-        assert all(isinstance(tag, str) for tag in tags)
-
-    async def test_get_file_stats_resource(self, obsidian_client: Client[FastMCPTransport], vault_files: list[str]):
-        """Test getting file statistics via resource."""
-        md_files = [f for f in vault_files if f.endswith('.md')]
-
-        if not md_files:
-            pytest.skip("No markdown files found")
-
-        test_file = md_files[0]
-
-        result = await obsidian_client.read_resource(
-            uri=f"obsidian://vault/{test_file}/stats"
-        )
-
-        stats = parse_resource_data(result)
-        assert stats is not None
-        assert isinstance(stats, dict)
-        assert 'ctime' in stats
-        assert 'mtime' in stats
-        assert 'size' in stats
-        assert isinstance(stats['size'], (int, float))
+        assert content is not None
+        assert isinstance(content, str)
+        # Content should be non-empty for markdown files
+        assert len(content) > 0
 
     async def test_metadata_resource_nonexistent_file(self, obsidian_client: Client[FastMCPTransport]):
         """Test that accessing metadata for non-existent file raises error."""

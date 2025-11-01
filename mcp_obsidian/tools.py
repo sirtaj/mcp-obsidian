@@ -18,8 +18,29 @@ obsidian_port = int(os.getenv("OBSIDIAN_PORT", "27124"))
 
 mcp = FastMCP(name="ObsidianServer",
               instructions="""
-                Use these tools to interact with your Obsidian vault.
-                The vault is the root directory of your Obsidian notes.
+Obsidian Vault Access via Local REST API
+
+TOOLS (18 available):
+- File Operations: list, read, write, append, batch read, delete
+- Search: simple text search, complex JsonLogic queries, search by tags/frontmatter, folder search
+- Content Patching: insert content relative to headings/blocks/frontmatter
+- Periodic Notes: access daily/weekly/monthly notes (requires Periodic Notes plugin)
+- Recent Changes: track file modifications (requires Dataview plugin)
+
+RESOURCES (2 available):
+- obsidian://vault/{filepath}/metadata - Complete file metadata (content, frontmatter, tags, stats)
+- obsidian://vault/{filepath}/content - File content only (plain text)
+
+PATH CONVENTIONS:
+- All file paths are relative to vault root (e.g., "Notes/meeting.md", not "/full/path/to/vault/Notes/meeting.md")
+- Directories end with "/" when listing (strip when using as paths)
+- Parent directories are created automatically when writing files
+
+IMPORTANT:
+- Delete operations require confirm=True parameter
+- Use /content resource for text-only access (efficient)
+- Use /metadata resource when you need frontmatter, tags, or stats
+- Extract specific fields client-side: metadata['frontmatter'], metadata['tags'], metadata['stat']
             """)
 
 if api_key == "":
@@ -342,48 +363,19 @@ def get_file_metadata_resource(filepath: Annotated[str, Field(description="File 
     api = _get_client()
     return api.get_file_metadata(filepath)
 
-@mcp.resource("obsidian://vault/{filepath}/frontmatter")
-def get_file_frontmatter(filepath: Annotated[str, Field(description="File path relative to vault root")]) -> Annotated[
-    Dict[str, Any],
-    Field(description="YAML frontmatter fields as a dictionary")
+@mcp.resource("obsidian://vault/{filepath}/content")
+def get_file_content_resource(filepath: Annotated[str, Field(description="File path relative to vault root")]) -> Annotated[
+    str,
+    Field(description="The file content as a string")
 ]:
-    """Get only the YAML frontmatter from a file.
+    """Get only the file content (without metadata).
 
-    Returns an empty dictionary if the file has no frontmatter.
+    This resource provides efficient access to just the file content,
+    without fetching frontmatter, tags, or stats. More efficient than
+    the /metadata resource when you only need the content.
     """
     api = _get_client()
-    metadata = api.get_file_metadata(filepath)
-    return metadata.get('frontmatter', {})
-
-@mcp.resource("obsidian://vault/{filepath}/tags")
-def get_file_tags(filepath: Annotated[str, Field(description="File path relative to vault root")]) -> Annotated[
-    List[str],
-    Field(description="Array of tags found in the file")
-]:
-    """Get all tags from a file.
-
-    Returns an empty array if the file has no tags.
-    """
-    api = _get_client()
-    metadata = api.get_file_metadata(filepath)
-    return metadata.get('tags', [])
-
-@mcp.resource("obsidian://vault/{filepath}/stats")
-def get_file_stats(filepath: Annotated[str, Field(description="File path relative to vault root")]) -> Annotated[
-    Dict[str, Any],
-    Field(description="File statistics with ctime, mtime, and size")
-]:
-    """Get file statistics (creation time, modification time, size).
-
-    Returns:
-        Dictionary with:
-        - ctime: Creation time (timestamp)
-        - mtime: Modification time (timestamp)
-        - size: File size in bytes
-    """
-    api = _get_client()
-    metadata = api.get_file_metadata(filepath)
-    return metadata.get('stat', {})
+    return api.get_file_contents(filepath)
 
 # ==============================================================================
 # Search Tools (Tag and Frontmatter Queries)
