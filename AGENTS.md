@@ -9,12 +9,13 @@ This file provides guidance for AI assistants and developers working on this cod
 **Framework:** FastMCP 2.0+
 **Language:** Python 3.11+
 **Purpose:** Provides programmatic access to Obsidian vaults via the Local REST API plugin
+**Repository:** https://github.com/sirtaj/mcp-obsidian
 
-This is a modernized fork that migrated from the legacy `mcp` library to `fastmcp 2.0+`.
+This is a fork of [MarkusPfundstein/mcp-obsidian](https://github.com/MarkusPfundstein/mcp-obsidian) that migrated from the legacy `mcp` library to `fastmcp 2.0+`.
 
 ## Architecture
 
-### Three-Layer Architecture
+### Four-Layer Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -26,45 +27,53 @@ This is a modernized fork that migrated from the legacy `mcp` library to `fastmc
 ┌──────────────▼──────────────────────────────────────────────┐
 │  Tools Layer (tools.py)                                     │
 │  - FastMCP server initialization                            │
-│  - 18-19 tool registrations (conditional)                   │
-│  - Environment config loading                               │
+│  - Tool registrations (conditional Omnisearch)              │
+│  - Resource registrations                                   │
 └──────────────┬──────────────────────────────────────────────┘
                │
-        ┌──────┴───────┐
-        │              │
-┌───────▼─────┐  ┌─────▼──────────────┐
-│ obsidian.py │  │ omnisearch.py      │
-│             │  │ (optional)         │
-│ - REST API  │  │ - HTTP search API  │
-│ - 11 methods│  │ - 1 method         │
-└─────────────┘  └────────────────────┘
+        ┌──────┴───────┬────────────────┐
+        │              │                │
+┌───────▼─────┐  ┌─────▼──────────┐  ┌─▼──────────┐
+│ obsidian.py │  │ omnisearch.py  │  │ config.py  │
+│             │  │ (optional)     │  │ constants  │
+│ - REST API  │  │ - HTTP search  │  │ utils.py   │
+│ - 14 methods│  │ - 1 method     │  └────────────┘
+└─────────────┘  └────────────────┘
 ```
 
 ### Core Files
 
 | File | Purpose | Lines | Key Responsibilities |
 |------|---------|-------|---------------------|
-| `mcp_obsidian/server.py` | Entry point | ~50 | CLI argument parsing, transport mode handling |
-| `mcp_obsidian/tools.py` | Tool registry | ~520 | All 18-19 MCP tool definitions, FastMCP server config |
-| `mcp_obsidian/obsidian.py` | Obsidian API client | ~450 | HTTP communication with Obsidian Local REST API |
-| `mcp_obsidian/omnisearch.py` | Omnisearch client | ~100 | HTTP communication with Omnisearch plugin (optional) |
+| `mcp_obsidian/server.py` | Entry point | ~71 | CLI argument parsing, transport mode handling |
+| `mcp_obsidian/tools.py` | Tool registry | ~1036 | MCP tool definitions, resources, FastMCP server config |
+| `mcp_obsidian/obsidian.py` | Obsidian API client | ~663 | HTTP communication with Obsidian Local REST API |
+| `mcp_obsidian/omnisearch.py` | Omnisearch client | ~92 | HTTP communication with Omnisearch plugin (optional) |
+| `mcp_obsidian/config.py` | Configuration mgmt | ~73 | Environment variable loading, config dataclasses |
+| `mcp_obsidian/constants.py` | Constants | ~83 | Named constants (follows user guideline) |
+| `mcp_obsidian/utils.py` | Utilities | ~134 | Shared helper functions, validators, formatters |
 
 ### Tool Categories
 
-The server provides 18 tools by default (19 with optional Omnisearch) organized into 6 categories:
+The server provides tools organized into these categories:
 
-1. **File Operations** (6 tools)
-   - List vault/directory contents
+1. **File Operations**
+   - List vault/directory contents (with recursive depth control)
    - Read single/batch files
    - Append/overwrite content
-
-2. **Content Patching** (1 tool)
-   - Insert content relative to headings/blocks/frontmatter
-
-3. **File Deletion** (1 tool)
    - Delete files/directories (with safety confirmation)
 
-4. **Search Operations** (6-7 tools)
+2. **File Organization**
+   - Move/rename single file (with safety confirmation)
+   - Bulk move/rename multiple files
+
+3. **Content Analysis**
+   - List headings in a file
+
+4. **Content Patching**
+   - Insert content relative to headings/blocks/frontmatter
+
+5. **Search Operations**
    - Simple text search
    - Complex JsonLogic queries
    - Search by tags/frontmatter
@@ -72,9 +81,31 @@ The server provides 18 tools by default (19 with optional Omnisearch) organized 
    - List all tags
    - **Omnisearch integration (optional)**: Advanced fuzzy search with BM25 scoring
 
-5. **Periodic Notes** (2 tools) + Recent Changes (1 tool)
-   - Get current/recent periodic notes
-   - Track recent file modifications
+6. **Periodic Notes**
+   - Get current/recent periodic notes (requires Periodic Notes plugin)
+
+7. **Recent Changes**
+   - Track recent file modifications (requires Dataview plugin)
+
+## Recent Additions (Since AGENTS.md Creation)
+
+The codebase has been significantly enhanced with:
+
+### New Tools
+- **obsidian_list_headings** - Extract all headings from a file (supports filtering by level)
+- **obsidian_move_file** - Move or rename a single file (requires confirmation)
+- **obsidian_bulk_move_files** - Batch move/rename multiple files efficiently
+
+### New Modules
+- **config.py** - Centralized configuration management with dataclasses
+- **constants.py** - All magic numbers extracted to named constants
+- **utils.py** - Shared helper functions (validators, formatters, separators)
+
+### Enhanced Features
+- **Recursive directory listing** - `max_depth` parameter for controlled recursion
+- **Improved error handling** - Dedicated validation functions in utils.py
+- **Better separation of concerns** - Configuration, constants, and utilities isolated
+- **MCP Resources** - Two read-only resources for efficient data access
 
 ## Key Design Patterns
 
@@ -119,14 +150,32 @@ This provides rich type hints AND user-facing documentation.
 
 ### 4. Environment-Based Configuration
 
-Configuration loaded via `python-dotenv`:
+Configuration loaded via `python-dotenv` and managed through `config.py`:
 
 ```python
-api_key = os.getenv("OBSIDIAN_API_KEY")  # Required
-host = os.getenv("OBSIDIAN_HOST", "127.0.0.1")  # Optional with default
+# In config.py
+@dataclass(frozen=True)
+class ObsidianConfig:
+    api_key: str
+    host: str
+    port: int
+    protocol: str
+
+# In tools.py
+obsidian_config = config.get_obsidian_config()
+client = Obsidian(
+    api_key=obsidian_config.api_key,
+    host=obsidian_config.host,
+    port=obsidian_config.port,
+    protocol=obsidian_config.protocol
+)
 ```
 
-No config files needed beyond `.env`.
+Benefits:
+- Type safety with frozen dataclasses
+- Centralized validation
+- Single source of truth for defaults
+- No config files needed beyond `.env`
 
 ### 5. Optional Feature Pattern: Omnisearch Integration
 
@@ -306,58 +355,74 @@ When changing `obsidian.py`:
    response = requests.get(..., verify=False)
    ```
 
-### Refactoring Magic Numbers (Per User Guidelines)
+### Magic Numbers Refactoring (Completed)
 
-The user's global instructions specify avoiding magic numbers. Current candidates:
+**Status**: ✅ Complete - All magic numbers have been extracted to `constants.py` following user guidelines.
 
-**In `obsidian.py`:**
-```python
-# Current (magic numbers)
-DEFAULT_PORT = 27124
-DEFAULT_TIMEOUT = (3, 6)  # (connect, read) timeout
-SSL_VERIFY = False
+The codebase now uses a dedicated `constants.py` module with descriptive, named constants:
 
-# Suggested constants at module level
-DEFAULT_OBSIDIAN_PORT = 27124
-CONNECTION_TIMEOUT_SECONDS = 3
-READ_TIMEOUT_SECONDS = 6
-DEFAULT_TIMEOUT_TUPLE = (CONNECTION_TIMEOUT_SECONDS, READ_TIMEOUT_SECONDS)
-OBSIDIAN_SSL_VERIFY = False
-```
+**Obsidian Configuration:**
+- `DEFAULT_OBSIDIAN_PORT = 27124`
+- `CONNECTION_TIMEOUT_SECONDS = 3`
+- `READ_TIMEOUT_SECONDS = 6`
+- `DELETE_TIMEOUT_SECONDS = 30`
+- `OBSIDIAN_SSL_VERIFY = False`
 
-**In `tools.py`:**
-```python
-# Current (magic numbers)
-DEFAULT_CONTEXT_LENGTH = 100
-DEFAULT_PERIODIC_NOTE_LIMIT = 5
-DEFAULT_RECENT_CHANGES_LIMIT = 10
-DEFAULT_RECENT_CHANGES_DAYS = 90
-DEFAULT_MCP_SERVER_PORT = 37123
+**Search Configuration:**
+- `SEARCH_DEFAULT_CONTEXT_LENGTH = 100`
 
-# Suggested constants at module level
-SEARCH_DEFAULT_CONTEXT_LENGTH = 100
-PERIODIC_NOTES_DEFAULT_LIMIT = 5
-RECENT_CHANGES_DEFAULT_LIMIT = 10
-RECENT_CHANGES_DEFAULT_DAYS = 90
-MCP_SERVER_DEFAULT_PORT = 37123
+**Periodic Notes:**
+- `PERIODIC_NOTES_DEFAULT_LIMIT = 5`
+- `VALID_PERIOD_TYPES = ["daily", "weekly", "monthly", "quarterly", "yearly"]`
+- `VALID_PERIODIC_NOTE_TYPES = ["content", "metadata"]`
 
-VALID_PERIOD_TYPES = ["daily", "weekly", "monthly", "quarterly", "yearly"]
-VALID_PERIODIC_NOTE_TYPES = ["content", "metadata"]
-```
+**Recent Changes:**
+- `RECENT_CHANGES_DEFAULT_LIMIT = 10`
+- `RECENT_CHANGES_DEFAULT_DAYS = 90`
 
-**When refactoring:** Extract constants to module level with clear, descriptive names.
+**Other:**
+- `DEFAULT_MCP_SERVER_PORT = 37123`
+- `VALID_FRONTMATTER_OPERATORS = ["equals", "contains", "exists"]`
+
+All code now imports from `constants` module instead of using inline literals.
 
 ## Testing Strategy
 
 ### Manual Testing with Claude Desktop
 
 1. **Add to Claude Desktop config:**
+
+**Config file locations:**
+- **MacOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- **Windows**: `%APPDATA%/Claude/claude_desktop_config.json`
+- **Linux**: `~/.config/Claude/claude_desktop_config.json`
+
+**For production use (GitHub install):**
+   ```json
+   {
+     "mcpServers": {
+       "obsidian": {
+         "command": "uvx",
+         "args": [
+           "--from",
+           "git+https://github.com/sirtaj/mcp-obsidian.git",
+           "mcp-obsidian"
+         ],
+         "env": {
+           "OBSIDIAN_API_KEY": "your_key_here"
+         }
+       }
+     }
+   }
+   ```
+
+**For local development:**
    ```json
    {
      "mcpServers": {
        "obsidian": {
          "command": "uv",
-         "args": ["run", "mcp-obsidian"],
+         "args": ["--directory", "/path/to/mcp-obsidian", "run", "mcp-obsidian"],
          "env": {
            "OBSIDIAN_API_KEY": "your_key_here"
          }
@@ -497,17 +562,23 @@ OMNISEARCH_PROTOCOL=http  # Usually HTTP, not HTTPS
 
 The `obsidian.py` client wraps these endpoints:
 
-| Method | Endpoint | Purpose | Tool |
-|--------|----------|---------|------|
+| Method | Endpoint | Purpose | Tool(s) |
+|--------|----------|---------|---------|
 | GET | `/vault/` | List vault root | `list_files_in_vault` |
 | GET | `/vault/{dirpath}/` | List directory | `list_files_in_dir` |
-| GET | `/vault/{filepath}` | Read file | `get_file_contents` |
+| GET | `/vault/{filepath}` | Read file | `get_file_contents`, `batch_get_file_contents` |
+| GET | `/vault/{filepath}` | Get headings | `list_headings` |
 | POST | `/vault/{filepath}` | Append content | `append_content` |
 | PUT | `/vault/{filepath}` | Overwrite file | `put_content` |
 | PATCH | `/vault/{filepath}` | Patch content | `patch_content` |
+| PATCH | `/vault/{filepath}` | Move/rename file | `move_file`, `bulk_move_files` |
 | DELETE | `/vault/{filepath}` | Delete file/dir | `delete_file` |
 | POST | `/search/simple/` | Text search | `simple_search` |
 | POST | `/search/` | JsonLogic/DQL search | `complex_search`, `get_recent_changes` |
+| POST | `/search/` | Tag search | `search_by_tags` |
+| POST | `/search/` | Frontmatter search | `search_by_frontmatter` |
+| POST | `/search/` | Folder search | `search_folders` |
+| GET | `/tags/` | List all tags | `list_all_tags` |
 | GET | `/periodic/{period}/` | Current periodic note | `get_periodic_note` |
 | GET | `/periodic/{period}/recent` | Recent periodic notes | `get_recent_periodic_notes` |
 
@@ -645,10 +716,17 @@ Currently, the server connects to one vault per instance. To support multiple:
 /home/sirtaj/proj/mcp-obsidian/
 ├── mcp_obsidian/
 │   ├── __init__.py           # Empty package marker
-│   ├── server.py             # CLI entry point (~50 lines)
-│   ├── tools.py              # 18-19 MCP tools (~520 lines)
-│   ├── obsidian.py           # Obsidian REST API client (~450 lines)
-│   └── omnisearch.py         # Omnisearch HTTP client (~100 lines, optional)
+│   ├── server.py             # CLI entry point (~71 lines)
+│   ├── tools.py              # 20-21 MCP tools, 2 resources (~1036 lines)
+│   ├── obsidian.py           # Obsidian REST API client (~663 lines)
+│   ├── omnisearch.py         # Omnisearch HTTP client (~92 lines, optional)
+│   ├── config.py             # Configuration management (~73 lines)
+│   ├── constants.py          # All constants/magic numbers (~83 lines)
+│   └── utils.py              # Shared utilities (~134 lines)
+├── tests/                    # Test suite (pytest)
+│   ├── test_obsidian_tools.py
+│   ├── test_metadata_search.py
+│   └── README.md
 ├── pyproject.toml            # Project metadata, dependencies
 ├── uv.lock                   # Locked dependencies
 ├── openapi.yaml              # Obsidian API specification
@@ -669,6 +747,10 @@ Currently, the server connects to one vault per instance. To support multiple:
 ## Quick Command Reference
 
 ```bash
+# Clone repository
+git clone https://github.com/sirtaj/mcp-obsidian.git
+cd mcp-obsidian
+
 # Installation
 uv sync
 
@@ -680,6 +762,9 @@ uv run mcp-obsidian --transport http --port 8080
 
 # Type checking
 uv run pyright mcp_obsidian/
+
+# Run tests
+uv run pytest
 
 # Add dependency
 uv add package-name
@@ -697,6 +782,6 @@ This fork represents a complete modernization to fastmcp 2.0+. Do not attempt to
 
 ---
 
-**Last Updated:** 2025-11-01
+**Last Updated:** 2025-11-02
 **Codebase Version:** 0.2.1
 **FastMCP Version:** 2.11.2+

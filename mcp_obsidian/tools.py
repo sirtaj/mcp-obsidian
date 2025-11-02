@@ -14,14 +14,15 @@ mcp = FastMCP(
     instructions=f"""
 Obsidian Vault Access via Local REST API
 
-TOOLS ({"21" if omnisearch_config.enabled else "20"} available):
+TOOLS:
 - File Operations: list, read, write, append, batch read, delete, move/rename, bulk move/rename
-- Search: simple text search, complex JsonLogic queries, search by tags/frontmatter, folder search{", Omnisearch advanced search (with fuzzy matching, BM25 scoring)" if omnisearch_config.enabled else ""}
+- Content Analysis: list headings
+- Search: simple text search, complex JsonLogic queries, search by tags/frontmatter, folder search{", Omnisearch (fuzzy matching, BM25 scoring)" if omnisearch_config.enabled else ""}
 - Content Patching: insert content relative to headings/blocks/frontmatter
-- Periodic Notes: access daily/weekly/monthly notes (requires Periodic Notes plugin)
+- Periodic Notes: access daily/weekly/monthly/quarterly/yearly notes (requires Periodic Notes plugin)
 - Recent Changes: track file modifications (requires Dataview plugin)
 
-RESOURCES (2 available):
+RESOURCES:
 - obsidian://vault/{{filepath}}/metadata - Complete file metadata (content, frontmatter, tags, stats)
 - obsidian://vault/{{filepath}}/content - File content only (plain text)
 
@@ -32,7 +33,7 @@ PATH CONVENTIONS:
 
 IMPORTANT:
 - Delete and move operations require confirm=True parameter
-- Use /content resource for text-only access (efficient)
+- Use /content resource for text-only access
 - Use /metadata resource when you need frontmatter, tags, or stats
 - Extract specific fields client-side: metadata['frontmatter'], metadata['tags'], metadata['stat']
             """,
@@ -67,13 +68,21 @@ def _get_omnisearch_client() -> omnisearch.OmnisearchClient:
 
 
 @mcp.tool(
-    description="Lists all files and directories in the root directory of your Obsidian vault. Returns a structured object with separate lists for files and directories.",
+    description="""Lists all files and directories in the root directory of your Obsidian vault.
+
+    Supports recursive listing with configurable depth. Returns a structured object with separate lists for files and directories.
+
+    Examples:
+    - max_depth=0: Only list files in the vault root (no subdirectories scanned)
+    - max_depth=1: List vault root + one level of subdirectories
+    - max_depth=2: List vault root + two levels deep
+    - max_depth=-1: Recursively list entire vault structure (all subdirectories)""",
 )
 def obsidian_list_files_in_vault(
     max_depth: Annotated[
         int,
         Field(
-            description="Maximum recursion depth: 0=current directory only, 1=one level deep, -1=unlimited (default: 0)"
+            description="Controls recursive directory scanning. 0=no recursion (current directory only), 1=one level of subdirectories, 2=two levels deep, -1=unlimited recursion (entire vault). Default: 0"
         ),
     ] = 0,
     folders_only: Annotated[
@@ -97,7 +106,15 @@ def obsidian_list_files_in_vault(
 
 
 @mcp.tool(
-    description="Lists all files and directories that exist in a specific Obsidian directory. Returns a structured object with separate lists for files and directories.",
+    description="""Lists all files and directories that exist in a specific Obsidian directory.
+
+    Supports recursive listing with configurable depth. Returns a structured object with separate lists for files and directories.
+
+    Examples:
+    - dirpath="Notes", max_depth=0: Only list files directly in Notes/ (no subdirectories scanned)
+    - dirpath="Projects", max_depth=1: List Projects/ + one level of subdirectories
+    - dirpath="Archive", max_depth=2: List Archive/ + two levels deep
+    - dirpath="Work", max_depth=-1: Recursively list entire Work/ folder structure""",
 )
 def obsidian_list_files_in_dir(
     dirpath: Annotated[
@@ -109,7 +126,7 @@ def obsidian_list_files_in_dir(
     max_depth: Annotated[
         int,
         Field(
-            description="Maximum recursion depth: 0=current directory only, 1=one level deep, -1=unlimited (default: 0)"
+            description="Controls recursive directory scanning. 0=no recursion (current directory only), 1=one level of subdirectories, 2=two levels deep, -1=unlimited recursion (entire folder tree). Default: 0"
         ),
     ] = 0,
     folders_only: Annotated[
@@ -143,23 +160,43 @@ def obsidian_get_file_contents(
 
 
 @mcp.tool(
-    description="""Simple search for documents matching a specified text query across all files in the vault.
+    description="""Simple text content search across all files in the vault.
+
+    USE THIS TOOL WHEN:
+    - Searching for specific words or phrases in note content
+    - You need to see context around each match
+    - You want a simple, straightforward text search
+    - You don't know which files contain the information
+
+    DO NOT USE THIS TOOL WHEN:
+    - You need to filter by file path/location → Use obsidian_complex_search
+    - You need to search by tags → Use obsidian_search_by_tags
+    - You need to search by frontmatter fields → Use obsidian_search_by_frontmatter
+    - You want fuzzy/typo-tolerant search → Use obsidian_omnisearch_search (if available)
+
+    Performs case-insensitive text search across all vault files. Returns matches with surrounding context.
+
+    Examples:
+    - query="machine learning": Find all mentions of "machine learning"
+    - query="TODO", context_length=50: Find TODO items with 50 chars of context
+    - query="John Smith": Find all references to a person
+    - query="function calculate": Find function definitions or calls
 
     Returns a list of search results, each containing:
     - filename: The file path
     - score: Relevance score (negative values, closer to 0 is more relevant)
     - matches: Array of match objects with context and match_position (start/end)
 
-    Use this tool when you want to do a simple text search.""",
+    The context_length parameter controls how much text is shown around each match (default: 100 characters).""",
 )
 def obsidian_simple_search(
-    query: Annotated[str, Field(description="The search query")],
+    query: Annotated[str, Field(description="The text to search for (case-insensitive)")],
     context_length: Annotated[
-        int, Field(description="Length of the context to return around each match")
+        int, Field(description="Number of characters to include around each match for context (default: 100)")
     ] = constants.SEARCH_DEFAULT_CONTEXT_LENGTH,
 ) -> Annotated[
     List[Dict[str, Any]],
-    Field(description="List of search results with filename, score, and matches"),
+    Field(description="List of search results with filename, score, and matches with context"),
 ]:
     api = _get_client()
     results = api.search(query, context_length)
@@ -495,13 +532,25 @@ def obsidian_bulk_move_files(
 
 
 @mcp.tool(
-    description="""Complex search for documents using a JsonLogic query.
-           Supports standard JsonLogic operators plus 'glob' and 'regexp' for pattern matching. Results must be non-falsy.
+    description="""Advanced search using JsonLogic queries to combine multiple criteria.
 
-           Use this tool when you want to do a complex search, e.g. for all documents with certain tags etc.
-           ALWAYS follow query syntax in examples.
+           USE THIS TOOL WHEN:
+           - You need to filter by file path/location AND content together
+           - You need to combine multiple search criteria with AND/OR logic
+           - You want to use glob patterns to match file paths
+           - You need regex pattern matching on paths or content
+           - Simple text search is too broad and returns too many results
 
-           Examples
+           DO NOT USE THIS TOOL WHEN:
+           - You just need simple text search → Use obsidian_simple_search
+           - You're searching purely by tags → Use obsidian_search_by_tags (simpler)
+           - You're searching purely by frontmatter → Use obsidian_search_by_frontmatter (simpler)
+           - You need fuzzy matching → Use obsidian_omnisearch_search (if available)
+
+           Supports standard JsonLogic operators plus 'glob' and 'regexp' for pattern matching.
+           Results must be non-falsy. ALWAYS follow query syntax in examples.
+
+           Examples:
              1. Match all markdown files
              {"glob": ["*.md", {"var": "path"}]}
 
@@ -519,6 +568,14 @@ def obsidian_bulk_move_files(
                  { "glob": ["*.md", {"var": "path"}] },
                  { "regexp": [".*Work.*", {"var": "path"}] },
                  { "regexp": ["Keaton", {"var": "content"}] }
+               ]
+             }
+
+             4. Match files in specific folders OR with specific extensions
+             {
+               "or": [
+                 { "glob": ["Projects/*", {"var": "path"}] },
+                 { "glob": ["*.pdf", {"var": "path"}] }
                ]
              }
            """,
@@ -576,19 +633,30 @@ def obsidian_batch_get_file_contents(
 
 
 @mcp.tool(
-    description="Get current periodic note for the specified period. REQUIRES the Periodic Notes plugin with the requested period type enabled in Obsidian.",
+    description="""Get current periodic note for the specified period. REQUIRES the Periodic Notes plugin with the requested period type enabled in Obsidian.
+
+    Returns either the note content or its metadata depending on the 'type' parameter.
+
+    Examples:
+    - period="daily", type="content": Returns today's daily note content as a string
+    - period="weekly", type="metadata": Returns this week's note metadata (frontmatter, tags, stats)
+    - period="monthly", type="content": Returns this month's note content
+    - period="yearly", type="content": Returns this year's note content
+
+    The 'metadata' type returns a dict with: content, frontmatter, tags, and file statistics.
+    The 'content' type returns just the note text as a string.""",
 )
 def obsidian_get_periodic_note(
     period: Annotated[
         str,
         Field(
-            description="The period type (daily, weekly, monthly, quarterly, yearly)"
+            description="The period type: 'daily', 'weekly', 'monthly', 'quarterly', or 'yearly'"
         ),
     ],
     type: Annotated[
-        str, Field(description="Type of the data to get ('content' or 'metadata')")
+        str, Field(description="Return format: 'content' (text only) or 'metadata' (full metadata dict including content, frontmatter, tags, stats)")
     ] = "content",
-) -> Annotated[Any, Field(description="The content or metadata of the periodic note")]:
+) -> Annotated[Any, Field(description="Either a string (if type='content') or a dict with metadata (if type='metadata')")]:
     utils.validate_period_type(period)
     utils.validate_note_type(type)
 
@@ -597,24 +665,35 @@ def obsidian_get_periodic_note(
 
 
 @mcp.tool(
-    description="Get most recent periodic notes for the specified period type. REQUIRES the Periodic Notes plugin with the requested period type enabled in Obsidian.",
+    description="""Get most recent periodic notes for the specified period type. REQUIRES the Periodic Notes plugin with the requested period type enabled in Obsidian.
+
+    Returns a list of recent notes with metadata, optionally including full content.
+
+    Examples:
+    - period="daily", limit=7: Get last 7 daily notes (metadata only, no content)
+    - period="daily", limit=7, include_content=True: Get last 7 daily notes with full content
+    - period="weekly", limit=4: Get last 4 weekly notes (metadata only)
+    - period="monthly", limit=12, include_content=True: Get last 12 monthly notes with content
+
+    Without include_content: Returns lightweight metadata (filename, date, path, frontmatter)
+    With include_content=True: Also includes the full note content in each result""",
 )
 def obsidian_get_recent_periodic_notes(
     period: Annotated[
         str,
         Field(
-            description="The period type (daily, weekly, monthly, quarterly, yearly)"
+            description="The period type: 'daily', 'weekly', 'monthly', 'quarterly', or 'yearly'"
         ),
     ],
     limit: Annotated[
-        int, Field(description="Maximum number of notes to return")
+        int, Field(description="Maximum number of notes to return (e.g., 7 for last week of daily notes)")
     ] = constants.PERIODIC_NOTES_DEFAULT_LIMIT,
     include_content: Annotated[
-        bool, Field(description="Whether to include note content")
+        bool, Field(description="If True, include full note content in results. If False (default), only return metadata (more efficient)")
     ] = False,
 ) -> Annotated[
     List[Dict[str, Any]],
-    Field(description="A list of recent periodic notes, with or without content"),
+    Field(description="List of note objects with metadata, optionally including 'content' field if include_content=True"),
 ]:
     utils.validate_period_type(period)
     utils.validate_positive_integer(limit, "limit")
@@ -625,19 +704,33 @@ def obsidian_get_recent_periodic_notes(
 
 
 @mcp.tool(
-    description="Get recently modified files in the vault. REQUIRES the Dataview plugin to be installed and enabled in Obsidian.",
+    description="""Get recently modified files in the vault. REQUIRES the Dataview plugin to be installed and enabled in Obsidian.
+
+    Returns files sorted by modification time (newest first), with timestamps and file paths.
+
+    Examples:
+    - limit=10, days=7: Get the 10 most recently modified files from the last 7 days
+    - limit=20, days=30: Get the 20 most recently modified files from the last month
+    - limit=5, days=1: Get the 5 most recently modified files from today
+
+    Useful for:
+    - Finding recently edited notes
+    - Tracking active work areas
+    - Reviewing recent changes before syncing
+
+    Each result includes: path, modification time, and optionally other metadata.""",
 )
 def obsidian_get_recent_changes(
     limit: Annotated[
-        int, Field(description="Maximum number of files to return")
+        int, Field(description="Maximum number of files to return (sorted by modification time, newest first)")
     ] = constants.RECENT_CHANGES_DEFAULT_LIMIT,
     days: Annotated[
-        int, Field(description="Only include files modified within this many days")
+        int, Field(description="Only include files modified within this many days (filters by recency window)")
     ] = constants.RECENT_CHANGES_DEFAULT_DAYS,
 ) -> Annotated[
     List[Dict[str, Any]],
     Field(
-        description="A list of recently modified files, with their modification times"
+        description="List of file objects with paths and modification timestamps, sorted newest first"
     ),
 ]:
     utils.validate_positive_integer(limit, "limit")
@@ -690,35 +783,64 @@ def get_file_content_resource(
 
 
 @mcp.tool(
-    description="""Search for files containing specified tags.
+    description="""Search for files by tags.
 
-    Use this tool to find all files that have specific tags. Supports both AND and OR logic:
-    - AND logic (match_all=True): Files must have ALL specified tags
-    - OR logic (match_all=False): Files with ANY of the specified tags will match
+    USE THIS TOOL WHEN:
+    - You need to find files with specific tags
+    - You want to filter notes by category/topic (using tags)
+    - You know the tags and want to find all related notes
+    - You need to combine multiple tag criteria (AND/OR logic)
 
-    Tags should be provided without the # prefix.""",
+    DO NOT USE THIS TOOL WHEN:
+    - You need to search note content → Use obsidian_simple_search
+    - You need to search by frontmatter fields → Use obsidian_search_by_frontmatter
+    - You need to combine tag search with path filters → Use obsidian_complex_search
+    - You don't know what tags exist → Use obsidian_list_all_tags first
+
+    Supports both AND and OR logic. Tags should be provided without the # prefix.
+
+    Examples:
+    - tags=["meeting", "urgent"], match_all=False: Files with #meeting OR #urgent (either tag)
+    - tags=["project", "2024"], match_all=True: Files with BOTH #project AND #2024
+    - tags=["todo"], match_all=False: All files with #todo tag
+    - tags=["python", "tutorial", "beginner"], match_all=True: Files with all three tags
+
+    Use match_all=False (default) for broader searches (OR logic)
+    Use match_all=True for precise filtering (AND logic - more restrictive)""",
 )
 def obsidian_search_by_tags(
     tags: Annotated[
-        List[str], Field(description="List of tags to search for (without # prefix)")
+        List[str], Field(description="List of tags to search for (without # prefix, e.g., ['meeting', 'work'])")
     ],
     match_all: Annotated[
         bool,
         Field(
-            description="If True, files must have ALL tags (AND). If False, files with ANY tag match (OR)."
+            description="If True, files must have ALL tags (AND logic). If False (default), files with ANY tag match (OR logic)."
         ),
     ] = False,
 ) -> Annotated[
-    List[Dict[str, Any]], Field(description="List of files matching the tag criteria")
+    List[Dict[str, Any]], Field(description="List of files matching the tag criteria, each with path and metadata")
 ]:
     api = _get_client()
     return api.search_by_tags(tags, match_all)
 
 
 @mcp.tool(
-    description="""Search files by frontmatter field values.
+    description="""Search files by YAML frontmatter metadata fields.
 
-    This tool allows you to search for files based on their YAML frontmatter fields.
+    USE THIS TOOL WHEN:
+    - You need to filter by frontmatter fields (status, author, date, custom fields, etc.)
+    - You want to find files with specific metadata values
+    - You need to check if a frontmatter field exists
+    - You're organizing notes with structured metadata
+
+    DO NOT USE THIS TOOL WHEN:
+    - You need to search note content → Use obsidian_simple_search
+    - You need to search by tags (inline #tags) → Use obsidian_search_by_tags
+    - You need to combine with path filters → Use obsidian_complex_search
+    - Tags are in frontmatter as YAML arrays → Use this tool with field="tags"
+
+    This tool searches YAML frontmatter at the top of markdown files.
 
     Operators:
     - "equals": Find files where field exactly matches the value
@@ -728,7 +850,8 @@ def obsidian_search_by_tags(
     Example uses:
     - Find files with status="done": field="status", value="done", operator="equals"
     - Find files with any status field: field="status", operator="exists"
-    - Find files tagged with "project": field="tags", value="project", operator="contains"
+    - Find files with tags array containing "project": field="tags", value="project", operator="contains"
+    - Find files by author: field="author", value="John Smith", operator="equals"
     """,
 )
 def obsidian_search_by_frontmatter(
@@ -748,7 +871,19 @@ def obsidian_search_by_frontmatter(
 
 
 @mcp.tool(
-    description="""Get all unique tags in the vault with usage counts.
+    description="""List all unique tags in the vault with usage counts.
+
+    USE THIS TOOL WHEN:
+    - You need to discover what tags exist in the vault
+    - You want to see tag usage statistics
+    - You're exploring the vault's tagging system
+    - You need to validate a tag name before searching
+    - You want to find popular/commonly used tags
+
+    DO NOT USE THIS TOOL WHEN:
+    - You already know the tag and want to find files → Use obsidian_search_by_tags
+    - You need to search note content → Use obsidian_simple_search
+    - You're looking for frontmatter fields → Use obsidian_search_by_frontmatter
 
     Returns a dictionary mapping each tag to the number of files using it.
     This is useful for getting an overview of all tags in your vault and
@@ -766,15 +901,26 @@ def obsidian_list_all_tags() -> Annotated[
 
 
 @mcp.tool(
-    description="""Recursively search for folders by name using case-insensitive substring matching.
+    description="""Search for folders/directories by name.
 
-    This tool searches through the entire vault folder hierarchy (or from a specified root)
+    USE THIS TOOL WHEN:
+    - You need to find directories/folders, not files
+    - You want to discover folder structure
+    - You're looking for a folder but don't know the exact path
+    - You need to explore folder organization
+
+    DO NOT USE THIS TOOL WHEN:
+    - You're searching for files → Use other search tools
+    - You're searching file content → Use obsidian_simple_search
+    - You already know the exact folder path → Use obsidian_list_files_in_dir directly
+
+    Searches through the entire vault folder hierarchy (or from a specified root)
     and returns all folders whose names contain the search term (case-insensitive).
 
     Examples:
-    - Search for "project" to find folders like "Projects", "my-project", "PROJECT-2024"
-    - Search for "archive" in "Notes" folder to find all archive folders under Notes
-    - Search for "2024" to find all folders with year 2024 in their name""",
+    - folder_name="project": Find folders like "Projects", "my-project", "PROJECT-2024"
+    - folder_name="archive", root_path="Notes": Find all archive folders under Notes
+    - folder_name="2024": Find all folders with year 2024 in their name""",
 )
 def obsidian_search_folders(
     folder_name: Annotated[
@@ -801,7 +947,22 @@ def obsidian_search_folders(
 if omnisearch_config.enabled:
 
     @mcp.tool(
-        description="""Search vault using Omnisearch plugin's advanced search engine.
+        description="""Advanced fuzzy search using Omnisearch plugin.
+
+        USE THIS TOOL WHEN:
+        - You want typo-tolerant / fuzzy matching (user might have typos)
+        - You need to search across PDFs and images (OCR)
+        - You want advanced relevance scoring (BM25 algorithm)
+        - Simple search returns nothing due to typos or variations
+        - You want recency-boosted results (recent files ranked higher)
+        - You're doing exploratory search with uncertain spelling
+
+        DO NOT USE THIS TOOL WHEN:
+        - Simple exact text search is sufficient → Use obsidian_simple_search
+        - You need to filter by tags → Use obsidian_search_by_tags
+        - You need to filter by frontmatter → Use obsidian_search_by_frontmatter
+        - You need complex path/content logic → Use obsidian_complex_search
+        - Omnisearch plugin is not installed → Falls back to obsidian_simple_search
 
         FEATURES:
         - Fuzzy matching for typo-tolerant searches
@@ -825,7 +986,7 @@ if omnisearch_config.enabled:
         - Omnisearch handles typos automatically
 
         EXAMPLES:
-        - meeting notes 2024 - Simple search
+        - meeting notes 2024 - Simple fuzzy search
         - path:"Work/Projects" deadline - Search in specific folder
         - "machine learning" -basics - Exact phrase, exclude basics
         - ext:pdf neural networks - Search only PDFs
